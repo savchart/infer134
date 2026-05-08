@@ -1,6 +1,8 @@
+import { localhostAnvil } from "./chains";
+
 export const wagmiPlaceholder = {
   enabled: false,
-  reason: "Wallet wiring is intentionally deferred for the local hackathon MVP.",
-  future: "Replace this with wagmi config when the UI starts sending local Anvil transactions."
+  chain: localhostAnvil,
+  reason: "Wallet wiring is intentionally deferred; local Anvil config is exposed for the demo.",
+  future: "Replace this placeholder with wagmi/viem client config when the UI starts sending local Anvil transactions."
 };
-
