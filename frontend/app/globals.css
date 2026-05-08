@@ -109,6 +109,14 @@ input {
   width: 100%;
 }
 
+select {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  padding: 10px;
+  width: 100%;
+}
+
 .badge {
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -137,3 +145,17 @@ pre {
   padding: 12px;
 }
 
+dd {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+dt {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+ul {
+  padding-left: 20px;
+}

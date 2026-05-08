@@ -38,10 +38,36 @@ export default function ProviderDashboard() {
           <p><strong>Status:</strong> available</p>
         </div>
 
+        <div className="panel">
+          <div className="kicker">Supported Models</div>
+          <dl>
+            <dt>mock-llama</dt>
+            <dd>worker_catalog · ready/cached · mock-runtime · 0.01 USDC inference fee</dd>
+            <dt>custom reference</dt>
+            <dd>custom_reference · preparation required · estimated cold-start fee 0.05 USDC</dd>
+          </dl>
+        </div>
+
+        <div className="panel">
+          <div className="kicker">Custom Model Request</div>
+          <label className="field">
+            Model source
+            <input defaultValue="hf://public/demo/custom-solar-adapter" />
+          </label>
+          <label className="field">
+            Revision
+            <input defaultValue="adapter-v1" />
+          </label>
+          <label className="field">
+            Runtime
+            <input defaultValue="mock-runtime" />
+          </label>
+          <p className="muted">Estimated cold-start fee: 0.05 USDC. Preparation is mocked for the MVP.</p>
+        </div>
+
         <ProviderList />
         <StatusTimeline />
       </section>
     </main>
   );
 }
-

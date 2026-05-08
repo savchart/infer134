@@ -4,7 +4,8 @@ const workers = [
     model: "mock-llama",
     hardware: "simulated/local worker",
     price: "0.01 USDC",
-    status: "available"
+    status: "available",
+    models: ["mock-llama · worker_catalog · ready", "custom references · accepted for preparation"]
   }
 ];
 
@@ -19,6 +20,7 @@ export function ProviderList() {
             <p className="muted">
               {worker.model} · {worker.hardware} · {worker.price}
             </p>
+            <p className="muted">Models: {worker.models.join(" | ")}</p>
             <span className="badge">{worker.status}</span>
           </div>
         ))}
@@ -26,4 +28,3 @@ export function ProviderList() {
     </div>
   );
 }
-
