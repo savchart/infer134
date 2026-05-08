@@ -1,0 +1,23 @@
+services:
+  provider-node:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./provider-node:/app
+    command: sh -c "python -m pip install -e . && python -m uvicorn app.main:app --host 0.0.0.0 --port 8010"
+    ports:
+      - "8010:8010"
+
+  backend:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    environment:
+      PROVIDER_NODE_URL: http://provider-node:8010
+    command: sh -c "python -m pip install -e . && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - provider-node
+
