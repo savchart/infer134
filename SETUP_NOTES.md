@@ -17,7 +17,7 @@ The active Python environment and the existing parent `.venv` did not have `pyda
 
 ## Assumptions
 
-- The project directory remains named `infermesh/`, but the user-facing product name is `Infer134`.
+- The project directory is named `infer134/`, matching the user-facing product name.
 - Backend payment state is mocked and local-only.
 - The local contract uses native ETH escrow on Anvil to demonstrate payment settlement metadata.
 - Backend pricing uses a USDC-style string such as `0.01 USDC` to match the x402/stablecoin narrative, but no token is implemented.

@@ -131,21 +131,21 @@ source .venv/bin/activate
 Install backend dependencies:
 
 ```bash
-cd infermesh/backend
+cd infer134/backend
 python -m pip install -e .
 ```
 
 Install worker node dependencies:
 
 ```bash
-cd infermesh/provider-node
+cd infer134/provider-node
 python -m pip install -e .
 ```
 
 Install frontend dependencies:
 
 ```bash
-cd infermesh/frontend
+cd infer134/frontend
 npm install
 ```
 
@@ -154,28 +154,28 @@ npm install
 Terminal 1, worker node:
 
 ```bash
-cd infermesh/provider-node
+cd infer134/provider-node
 python -m uvicorn app.main:app --reload --port 8010
 ```
 
 Terminal 2, backend:
 
 ```bash
-cd infermesh/backend
+cd infer134/backend
 PROVIDER_NODE_URL=http://127.0.0.1:8010 python -m uvicorn app.main:app --reload --port 8000
 ```
 
 Terminal 3, frontend:
 
 ```bash
-cd infermesh/frontend
+cd infer134/frontend
 npm run dev
 ```
 
 Contracts with local Anvil:
 
 ```bash
-cd infermesh/contracts
+cd infer134/contracts
 forge test
 anvil
 ```
@@ -185,7 +185,7 @@ anvil
 After starting the worker node and backend:
 
 ```bash
-cd infermesh
+cd infer134
 ./scripts/demo_flow.sh
 ```
 
@@ -198,35 +198,35 @@ Tests are local-only. They do not call external APIs, public networks, Docker, o
 Backend tests:
 
 ```bash
-cd infermesh/backend
+cd infer134/backend
 python -m pytest -q
 ```
 
 Worker node tests:
 
 ```bash
-cd infermesh/provider-node
+cd infer134/provider-node
 python -m pytest -q
 ```
 
 Contract tests:
 
 ```bash
-cd infermesh/contracts
+cd infer134/contracts
 forge test
 ```
 
 All local checks:
 
 ```bash
-cd infermesh
+cd infer134
 bash scripts/test_all.sh
 ```
 
 ## Verification Commands
 
 ```bash
-cd infermesh
+cd infer134
 python -m compileall backend provider-node
 bash scripts/test_all.sh
 ```
