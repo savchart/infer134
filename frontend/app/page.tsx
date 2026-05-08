@@ -15,6 +15,7 @@ export default function BuyerDashboard() {
           <h1>Private offchain inference with signed execution receipts and programmable payment settlement.</h1>
         </div>
         <div className="nav-links">
+          <Link href="/demo">Demo</Link>
           <Link href="/provider">Worker</Link>
           <Link href="/agent">Agent</Link>
           <Link href="/jobs/job-0001">Job</Link>
