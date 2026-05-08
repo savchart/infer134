@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
-from app.identity import identity_metadata
+from app.chain import chain_status
+from app.identity import get_identity_metadata, identity_metadata, resolve_name
 from app.jobs import (
     create_job,
     get_job,
@@ -14,11 +15,20 @@ from app.jobs import (
     submit_job,
     claim_job,
 )
+from app.model_registry import (
+    get_model,
+    list_models,
+    list_worker_models,
+    prepare_model,
+    register_model,
+)
 from app.models import (
     AgentTaskRequest,
     ClaimJobRequest,
     CreateJobRequest,
+    PrepareModelRequest,
     PayJobRequest,
+    RegisterModelRequest,
     RegisterWorkerRequest,
     RunJobRequest,
     SubmitJobRequest,
@@ -48,9 +58,29 @@ def health() -> dict[str, str]:
     }
 
 
+@app.get("/chain/status")
+def chain_status_endpoint():
+    return chain_status()
+
+
 @app.get("/identity/mock")
 def mock_identities() -> dict[str, str]:
     return identity_metadata()
+
+
+@app.get("/identity/resolve/{name}")
+def resolve_identity_endpoint(name: str):
+    return {
+        "name": name,
+        "address": resolve_name(name),
+        "resolver": "mock-ens-style-resolver",
+        "note": "This MVP uses mocked ENS-style resolution. Real ENS resolution can replace this boundary later.",
+    }
+
+
+@app.get("/identity/{name}/metadata")
+def identity_metadata_endpoint(name: str):
+    return get_identity_metadata(name)
 
 
 @app.post("/workers/register")
@@ -71,6 +101,14 @@ def worker_endpoint(worker_id: str):
         raise _handle_value_error(exc) from exc
 
 
+@app.get("/workers/{worker_id}/models")
+def worker_models_endpoint(worker_id: str):
+    try:
+        return list_worker_models(STORE, worker_id)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
 @app.post("/providers/register")
 def legacy_register_provider_endpoint(request: RegisterWorkerRequest):
     return register_worker(STORE, request)
@@ -79,6 +117,32 @@ def legacy_register_provider_endpoint(request: RegisterWorkerRequest):
 @app.get("/providers")
 def legacy_providers_endpoint():
     return list_workers(STORE)
+
+
+@app.get("/models")
+def models_endpoint():
+    return list_models(STORE)
+
+
+@app.post("/models/register")
+def register_model_endpoint(request: RegisterModelRequest):
+    return register_model(STORE, request)
+
+
+@app.post("/models/prepare")
+def prepare_model_endpoint(request: PrepareModelRequest):
+    try:
+        return prepare_model(STORE, request)
+    except (KeyError, ValueError) as exc:
+        raise _handle_value_error(ValueError(str(exc))) from exc
+
+
+@app.get("/models/{model_id}")
+def model_endpoint(model_id: str):
+    try:
+        return get_model(STORE, model_id)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
 
 
 @app.post("/jobs")
@@ -152,9 +216,8 @@ def legacy_complete_job_endpoint(job_id: str, request: SubmitJobRequest = Submit
 
 @app.post("/jobs/{job_id}/pay")
 def pay_job_endpoint(job_id: str, request: PayJobRequest = PayJobRequest()):
-    del request
     try:
-        return pay_job(STORE, job_id)
+        return pay_job(STORE, job_id, request)
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
