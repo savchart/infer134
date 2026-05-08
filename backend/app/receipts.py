@@ -47,6 +47,12 @@ def build_execution_receipt(job: Job) -> ExecutionReceipt:
     unsigned = {
         "job_id": job.job_id,
         "model": job.model,
+        "model_id": job.model_id,
+        "model_source": job.model_source.value,
+        "model_revision": job.model_revision,
+        "model_hash": job.model_hash,
+        "adapter_hash": job.adapter_hash,
+        "runtime": job.runtime,
         "input_hash": job.input_hash,
         "output_hash": job.output_hash,
         "worker": job.worker,
@@ -54,6 +60,8 @@ def build_execution_receipt(job: Job) -> ExecutionReceipt:
         "buyer": job.buyer,
         "buyer_name": job.buyer_name,
         "price": job.price,
+        "cold_start_fee": job.cold_start_fee,
+        "inference_fee": job.inference_fee,
         "payment_state": PaymentState.PAYABLE.value,
         "timestamp": utc_timestamp(),
     }
@@ -76,4 +84,5 @@ def verify_execution_receipt(receipt: ExecutionReceipt) -> dict[str, Any]:
         "actual_receipt_hash": receipt.receipt_hash,
         "signature_scheme": "demo deterministic placeholder; not production cryptography",
         "semantic_correctness": "not verified",
+        "model_hash_claim": "trusted worker claim in this MVP; not proof of real execution",
     }
