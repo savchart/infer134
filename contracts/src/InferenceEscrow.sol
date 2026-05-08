@@ -30,8 +30,8 @@ contract InferenceEscrow {
         uint256 indexed jobId,
         address indexed buyer,
         address indexed worker,
-        uint256 escrowAmount,
-        bytes32 inputHash
+        bytes32 inputHash,
+        uint256 escrowAmount
     );
 
     event ResultSubmitted(
@@ -46,9 +46,8 @@ contract InferenceEscrow {
         uint256 indexed jobId,
         address indexed buyer,
         address indexed worker,
-        uint256 payment,
-        uint256 refund,
-        bytes32 receiptHash
+        uint256 paidAmount,
+        uint256 refundedAmount
     );
 
     event JobCancelled(uint256 indexed jobId, address indexed buyer, uint256 refund);
@@ -78,7 +77,7 @@ contract InferenceEscrow {
             status: JobStatus.Created
         });
 
-        emit JobCreated(jobId, msg.sender, worker, msg.value, inputHash);
+        emit JobCreated(jobId, msg.sender, worker, inputHash, msg.value);
     }
 
     function submitResult(
@@ -109,7 +108,6 @@ contract InferenceEscrow {
         uint256 refund = job.escrowAmount - payment;
         address payable buyer = job.buyer;
         address payable worker = job.worker;
-        bytes32 receiptHash = job.receiptHash;
 
         job.status = JobStatus.Paid;
         job.escrowAmount = 0;
@@ -124,7 +122,7 @@ contract InferenceEscrow {
             if (!refundedBuyer) revert TransferFailed();
         }
 
-        emit PaymentReleased(jobId, buyer, worker, payment, refund, receiptHash);
+        emit PaymentReleased(jobId, buyer, worker, payment, refund);
     }
 
     function cancelJob(uint256 jobId) external {
@@ -148,4 +146,3 @@ contract InferenceEscrow {
         if (job.buyer == address(0)) revert JobNotFound();
     }
 }
-

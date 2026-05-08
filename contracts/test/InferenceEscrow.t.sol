@@ -54,4 +54,20 @@ contract InferenceEscrowTest {
         require(storedReceiptHash == receiptHash, "receipt hash mismatch");
         require(status == InferenceEscrow.JobStatus.Paid, "job not paid");
     }
+
+    function testBuyerCanCancelBeforeResultSubmission() public {
+        InferenceEscrow escrow = new InferenceEscrow();
+        WorkerActor worker = new WorkerActor();
+
+        uint256 jobId = escrow.createJob{value: 1 ether}(payable(address(worker)), keccak256("input"));
+        uint256 balanceBefore = address(this).balance;
+
+        escrow.cancelJob(jobId);
+
+        (, , uint256 remainingEscrow, , , , , InferenceEscrow.JobStatus status) = escrow.jobs(jobId);
+
+        require(remainingEscrow == 0, "escrow was not cleared");
+        require(status == InferenceEscrow.JobStatus.Cancelled, "job not cancelled");
+        require(address(this).balance == balanceBefore + 1 ether, "buyer was not refunded");
+    }
 }
