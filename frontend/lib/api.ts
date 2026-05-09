@@ -33,7 +33,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Infer134 API error ${response.status}`);
+    let detail = "";
+    try {
+      const body = await response.clone().json();
+      if (body && typeof body === "object") {
+        const raw = (body as { detail?: unknown }).detail;
+        if (typeof raw === "string") {
+          detail = raw;
+        } else if (raw !== undefined) {
+          detail = JSON.stringify(raw);
+        }
+      }
+    } catch {
+      try {
+        detail = (await response.text()).trim();
+      } catch {
+        detail = "";
+      }
+    }
+    throw new Error(detail ? `${response.status}: ${detail}` : `Infer134 API error ${response.status}`);
   }
 
   return response.json() as Promise<T>;
@@ -264,6 +282,10 @@ export function verifyAuthChallenge(challenge: AuthChallenge, signature: string)
       signature
     })
   });
+}
+
+export function fetchAuthSession(sessionToken: string) {
+  return request<AuthSession>(`/auth/session/${sessionToken}`);
 }
 
 export function logoutAuthSession(sessionToken: string) {
