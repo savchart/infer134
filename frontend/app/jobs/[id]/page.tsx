@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ComputeReceipt } from "../../../components/ComputeReceipt";
 import { StatusTimeline } from "../../../components/StatusTimeline";
+import { WalletHeader } from "../../../components/WalletHeader";
 
 type JobPageProps = {
   params: {
@@ -12,6 +13,8 @@ type JobPageProps = {
 export default function JobPage({ params }: JobPageProps) {
   return (
     <main className="shell">
+      <WalletHeader role="client" ensStyleName="research-agent.eth" />
+
       <nav className="nav">
         <div>
           <div className="kicker">Job Status</div>
@@ -42,4 +45,3 @@ export default function JobPage({ params }: JobPageProps) {
     </main>
   );
 }
-

@@ -2,10 +2,13 @@ import Link from "next/link";
 
 import { ComputeReceipt } from "../../components/ComputeReceipt";
 import { StatusTimeline } from "../../components/StatusTimeline";
+import { WalletHeader } from "../../components/WalletHeader";
 
 export default function AgentDashboard() {
   return (
     <main className="shell">
+      <WalletHeader role="client" ensStyleName="research-agent.eth" />
+
       <nav className="nav">
         <div>
           <div className="kicker">Agent Dashboard</div>
