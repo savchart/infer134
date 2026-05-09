@@ -157,7 +157,7 @@ export default function ProviderDashboard() {
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>(["Qwen/Qwen2.5-0.5B-Instruct"]);
   const [tokenPrice, setTokenPrice] = useState("0.25 local ETH");
   const [publishedOffers, setPublishedOffers] = useState<WorkerOffer[]>([]);
-  const [notice, setNotice] = useState("Configure an offer draft, then publish it for buyers.");
+  const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
   const [providerSession, setProviderSession] = useState<AuthSession | undefined>();
@@ -204,7 +204,6 @@ export default function ProviderDashboard() {
           setProviderNodeOnline("online");
           setProviderRuntime(health.runtime ?? "unknown");
           setProviderRuntimeModel(health.model ?? "");
-          setNotice(`Provider-node online. Runtime: ${health.runtime ?? "unknown"}. Select compatible GPU capacity and models.`);
         }
         return getProviderModels();
       })
@@ -377,7 +376,7 @@ export default function ProviderDashboard() {
             model, runtime, and price per 1M tokens before creating a job.
           </p>
         </div>
-        <div className="notice">{notice}</div>
+        {notice ? <div className="notice">{notice}</div> : null}
       </section>
 
       <section className="provider-grid">
