@@ -1,5 +1,6 @@
 import {
   createAuthChallenge,
+  fetchAuthSession,
   logoutAuthSession,
   verifyAuthChallenge,
   type AuthRole,
@@ -15,6 +16,8 @@ export type WalletAuthState = {
 
 type EthereumProvider = {
   request<T = unknown>(args: { method: string; params?: unknown[] }): Promise<T>;
+  on?: (event: string, handler: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
 };
 
 declare global {
@@ -95,4 +98,83 @@ export async function disconnectWalletSession(role: AuthRole, sessionToken?: str
     }
   }
   clearWalletSession(role);
+}
+
+/**
+ * Re-check that a stored session still exists on the backend.
+ * Returns the session if the backend confirms it, or undefined and clears
+ * localStorage if the backend forgot it (e.g. after a restart).
+ */
+export async function revalidateWalletSession(role: AuthRole): Promise<AuthSession | undefined> {
+  const stored = loadWalletSession(role);
+  if (!stored) {
+    return undefined;
+  }
+  try {
+    const fresh = await fetchAuthSession(stored.session_token);
+    saveWalletSession(fresh);
+    return fresh;
+  } catch {
+    clearWalletSession(role);
+    return undefined;
+  }
+}
+
+export type WalletState = {
+  address?: string;
+  chainIdHex?: string;
+};
+
+export async function readCurrentWalletState(): Promise<WalletState> {
+  if (typeof window === "undefined" || !window.ethereum) {
+    return {};
+  }
+  const provider = window.ethereum;
+  const [accounts, chainId] = await Promise.all([
+    provider.request<string[]>({ method: "eth_accounts" }).catch(() => [] as string[]),
+    provider.request<string>({ method: "eth_chainId" }).catch(() => undefined)
+  ]);
+  return {
+    address: accounts[0]?.toLowerCase(),
+    chainIdHex: typeof chainId === "string" ? chainId.toLowerCase() : undefined
+  };
+}
+
+/**
+ * Subscribe to MetaMask accountsChanged + chainChanged.
+ * The handler is invoked with the next state shape; returns an unsubscribe fn.
+ */
+export function watchWalletState(handler: (next: WalletState) => void): () => void {
+  if (typeof window === "undefined" || !window.ethereum?.on) {
+    return () => {};
+  }
+  const provider = window.ethereum;
+  const onAccounts = (...args: unknown[]) => {
+    const accounts = args[0];
+    const next = Array.isArray(accounts) ? (accounts[0] as string | undefined) : undefined;
+    handler({ address: typeof next === "string" ? next.toLowerCase() : undefined });
+  };
+  const onChain = (...args: unknown[]) => {
+    const chainId = args[0];
+    handler({ chainIdHex: typeof chainId === "string" ? chainId.toLowerCase() : undefined });
+  };
+  provider.on?.("accountsChanged", onAccounts);
+  provider.on?.("chainChanged", onChain);
+  return () => {
+    provider.removeListener?.("accountsChanged", onAccounts);
+    provider.removeListener?.("chainChanged", onChain);
+  };
+}
+
+export const LOCAL_ANVIL_CHAIN_ID_HEX = "0x7a69";
+
+export function isLocalAnvilChain(chainIdHex: string | undefined): boolean {
+  return typeof chainIdHex === "string" && chainIdHex.toLowerCase() === LOCAL_ANVIL_CHAIN_ID_HEX;
+}
+
+export function addressesEqual(a?: string, b?: string): boolean {
+  if (!a || !b) {
+    return false;
+  }
+  return a.toLowerCase() === b.toLowerCase();
 }

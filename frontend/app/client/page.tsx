@@ -21,7 +21,14 @@ import {
   parseInferenceFeeToWei,
   releaseEscrowPayment
 } from "../../lib/escrow";
-import { requestWalletAddress } from "../../lib/walletAuth";
+import {
+  addressesEqual,
+  isLocalAnvilChain,
+  readCurrentWalletState,
+  requestWalletAddress,
+  watchWalletState,
+  type WalletState
+} from "../../lib/walletAuth";
 
 type RunState = "idle" | "paying" | "running" | "ready" | "released" | "error";
 
@@ -74,6 +81,7 @@ export default function ClientMarketplacePage() {
   const [releaseTxHash, setReleaseTxHash] = useState<string | undefined>();
   const [runState, setRunState] = useState<RunState>("idle");
   const [notice, setNotice] = useState("");
+  const [walletState, setWalletState] = useState<WalletState>({});
 
   const selectedOffer = useMemo(
     () => offers.find((offer) => offer.offer_id === selectedOfferId),
@@ -83,6 +91,32 @@ export default function ClientMarketplacePage() {
   const contractAddress = status.chainStatus?.contract_address ?? undefined;
   const chainEnabled = status.chain === "connected" && Boolean(contractAddress);
   const paymentState = job?.payment_state ?? (runState === "released" ? "paid" : "unpaid");
+
+  const walletConnected = Boolean(walletState.address);
+  const walletOnAnvil = isLocalAnvilChain(walletState.chainIdHex);
+  const walletMatchesSession = !session || addressesEqual(session.address, walletState.address);
+
+  const blockers: string[] = [];
+  if (status.backend !== "connected") {
+    blockers.push("Backend is offline (start uvicorn on :8000).");
+  }
+  if (!chainEnabled) {
+    blockers.push("Local Anvil + InferenceEscrow are not configured on the backend.");
+  }
+  if (!selectedOffer) {
+    blockers.push("Pick a GPU + model option above.");
+  }
+  if (!prompt.trim()) {
+    blockers.push("Write a prompt.");
+  }
+  if (!walletConnected) {
+    blockers.push("Connect a browser wallet.");
+  } else if (!walletOnAnvil) {
+    blockers.push("Switch the wallet to Local Anvil (chain id 31337). MetaMask will be asked automatically when you click Pay & run.");
+  }
+  if (walletConnected && !walletMatchesSession) {
+    blockers.push("Wallet account differs from the signed-in session. Click Disconnect in the top-right and reconnect with the active account.");
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -144,8 +178,18 @@ export default function ClientMarketplacePage() {
 
     loadMarketplace();
 
+    readCurrentWalletState().then((initial) => {
+      if (mounted) {
+        setWalletState(initial);
+      }
+    });
+    const unsubscribeWallet = watchWalletState((next) => {
+      setWalletState((current) => ({ ...current, ...next }));
+    });
+
     return () => {
       mounted = false;
+      unsubscribeWallet();
     };
   }, []);
 
@@ -239,9 +283,7 @@ export default function ClientMarketplacePage() {
 
   const busy = runState === "paying" || runState === "running";
   const canPay =
-    Boolean(selectedOffer) &&
-    chainEnabled &&
-    Boolean(prompt.trim()) &&
+    blockers.length === 0 &&
     !busy &&
     runState !== "ready" &&
     runState !== "released";
@@ -356,9 +398,15 @@ export default function ClientMarketplacePage() {
                   : "Pay & run"}
               </button>
             </div>
-            {!chainEnabled ? (
+            {blockers.length ? (
+              <ul className="check-list muted-list">
+                {blockers.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            ) : runState === "idle" ? (
               <p className="muted">
-                Local Anvil + InferenceEscrow address are required. Check <code>chain/status</code> on the backend.
+                Ready: wallet on {walletState.chainIdHex ? `chain ${parseInt(walletState.chainIdHex, 16)}` : "Anvil"}, prompt and offer set.
               </p>
             ) : null}
           </div>
@@ -377,6 +425,24 @@ export default function ClientMarketplacePage() {
             <span className="eyebrow">Current state</span>
             <p className={`payment-state ${paymentState}`}>{PHASE_LABELS[runState]}</p>
             <dl className="state-list">
+              <dt>Active wallet</dt>
+              <dd>
+                {walletState.address ? (
+                  <code title={walletState.address}>{shortHash(walletState.address)}</code>
+                ) : (
+                  <span className="status-pill warn">not connected</span>
+                )}
+              </dd>
+              <dt>Network</dt>
+              <dd>
+                {walletState.chainIdHex ? (
+                  <span className={walletOnAnvil ? "status-pill good" : "status-pill warn"}>
+                    {walletOnAnvil ? "Anvil 31337" : `chain ${parseInt(walletState.chainIdHex, 16)}`}
+                  </span>
+                ) : (
+                  <span className="status-pill warn">no chain</span>
+                )}
+              </dd>
               <dt>Payment state</dt>
               <dd>
                 <span className={`payment-state ${paymentState}`}>{paymentState}</span>
