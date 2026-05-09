@@ -28,7 +28,7 @@
 - Code is public and open source for judging.
 - Demo is local-first and does not depend on paid APIs.
 - Real ENS, real x402, TEE, ZK, staking, reputation, and production decentralization are explicitly out of scope for this prototype.
-- The judging demo should use `/demo` for the guided flow and `scripts/demo_flow.sh` for the API path.
+- The judging demo should use `/client` for the guided buyer flow (single Pay & run button, wallet-signed escrow) and `scripts/demo_flow.sh` for the API path (`cast send` + `curl /jobs/run-paid`).
 
 ## Manual-Aligned Requirements
 
@@ -41,7 +41,7 @@
 
 - [ ] Confirm repository is public.
 - [ ] Confirm README explains what is mocked and trusted.
-- [ ] Confirm `/demo` loads locally.
+- [ ] Confirm `/client` loads locally and Pay & run reaches `payable` state with the local Anvil + provider-node stack (`bash scripts/start_dev_stack.sh` covers chain + backend in one command).
 - [ ] Confirm backend and worker node tests pass.
 - [ ] Confirm Foundry test passes.
 - [ ] Record demo video link.

@@ -16,8 +16,9 @@
 
 ## Product Direction
 
-- The MVP should be a guided buyer journey:
-  request -> model selection -> worker selection -> escrow -> inference -> receipt -> verification -> payment release -> result.
+- The MVP is a single-step pay-and-run buyer journey on `/client`:
+  pick offer -> write prompt -> wallet signs `createJob{value}` on local Anvil -> backend verifies the onchain escrow -> inference runs offchain -> signed receipt returned -> optional wallet-signed `releasePayment` settles the escrow.
+- Inference must stay gated on the verified onchain escrow; do not add code paths that skip verification.
 - Do not turn the project into a generic landing page, dashboard, cloud platform, or full decentralized compute protocol.
 - Do not claim the system is trustless, fully decentralized, or proof-of-compute unless those properties are actually implemented.
 - Clearly separate:

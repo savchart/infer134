@@ -63,17 +63,16 @@ Clear caveat:
 
 ## ETHPrague: Best UX Flow
 
-The `/demo` page translates blockchain and payment mechanics into a readable sequence:
+The `/client` page collapses the pay-per-inference loop into a single button. Behind the scenes:
 
-1. Agent identity.
-2. Worker discovery.
-3. Payment escrowed.
-4. Offchain inference.
-5. Execution receipt.
-6. Verification status.
-7. Payment paid.
+1. Wallet authenticates the buyer with a `personal_sign` challenge (`/`).
+2. The buyer picks an offer and writes a prompt; the page hashes the prompt locally.
+3. **Pay & run** triggers one wallet popup — `createJob(workerAddress, inputHash){value}` on local Anvil.
+4. The backend reads the onchain escrow, gates inference on the verified state, and runs the model offchain.
+5. The page shows the offchain output, hashes, and a phase indicator (`paying → running → ready → released`).
+6. Optional: **Release payment** triggers a second wallet popup — `releasePayment(uint256)` settles the escrow.
 
-This avoids raw hex-first UX and makes the state machine understandable.
+A preflight checklist disables Pay & run with concrete reasons (backend offline, anvil unconfigured, wallet on the wrong chain, account differs from session) so the buyer never gets a surprise revert mid-flow.
 
 ## Optional: Best Hardware Usage
 
