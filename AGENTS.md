@@ -68,7 +68,7 @@
 - List verification commands before implementation changes.
 - Run the narrowest useful checks first.
 - Prefer deterministic local tests.
-- If a tool is missing, record it in `SETUP_NOTES.md` and continue where possible.
+- If a tool is missing, record it in the final report and continue where possible.
 - Useful checks include:
   - `python -m compileall backend provider-node`
   - `cd backend && python -m pytest -q`

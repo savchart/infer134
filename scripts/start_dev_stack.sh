@@ -9,8 +9,8 @@ set -euo pipefail
 # Ctrl+C stops the backend; if anvil was started by this script, it is killed
 # on exit too. Anvil started by another terminal stays untouched.
 #
-# Provider-node (port 8010) and the frontend (port 3000) stay separate —
-# launch them in their own terminals from infer134/DEMO_INSTRUCTIONS.md.
+# Provider-node (port 8010) and the frontend (port 3000) stay separate.
+# Launch them in their own terminals from infer134/demo_setup.md.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RPC_URL="${RPC_URL:-http://127.0.0.1:8545}"
