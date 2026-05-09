@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" rx="6" fill="#0f1a2e" />
+  <polygon
+    points="16,4 26,9.5 26,22.5 16,28 6,22.5 6,9.5"
+    fill="none" stroke="#f4f6fa" stroke-width="1.5" stroke-linejoin="round" />
+  <text
+    x="16" y="20" text-anchor="middle"
+    font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    font-weight="700" font-size="9" fill="#f4f6fa" letter-spacing="-0.5">134</text>
+  <circle cx="24" cy="24" r="5" fill="#22c55e" stroke="#0f1a2e" stroke-width="1" />
+  <path d="M21.5 24 L23.3 25.8 L26.5 22" stroke="#0f1a2e" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+</svg>

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" width="360" height="96" role="img" aria-label="Infer134 — private inference, signed receipts">
+  <title>Infer134</title>
+  <desc>Hexagonal vault containing the digits 134 with a verified payment badge, beside an infer134 wordmark and tagline.</desc>
+
+  <!-- Mark -->
+  <g transform="translate(12 12)" fill="none" stroke-linejoin="round">
+    <!-- Outer hex (privacy vault) -->
+    <polygon
+      points="36,4 66,21 66,55 36,72 6,55 6,21"
+      stroke="#0f1a2e" stroke-width="3" fill="#ffffff" />
+
+    <!-- Inner hex (offchain compute layer) -->
+    <polygon
+      points="36,16 56,27 56,49 36,60 16,49 16,27"
+      stroke="#0f1a2e" stroke-width="1.5" stroke-dasharray="2 3" />
+
+    <!-- 134 inside the vault -->
+    <text
+      x="36" y="44" text-anchor="middle"
+      font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+      font-weight="700" font-size="20" fill="#0f1a2e" letter-spacing="-1">134</text>
+
+    <!-- Verified-payment chip -->
+    <circle cx="60" cy="62" r="11" fill="#22c55e" stroke="#0f1a2e" stroke-width="2" />
+    <path d="M55 62 L58.5 65.5 L65 58" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" fill="none" />
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(102 0)">
+    <text
+      x="0" y="56"
+      font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
+      font-weight="700" font-size="36" fill="#0f1a2e" letter-spacing="-0.6">infer<tspan fill="#22c55e">134</tspan></text>
+    <text
+      x="2" y="76"
+      font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif"
+      font-weight="500" font-size="11" fill="#5b6478" letter-spacing="2">PRIVATE INFERENCE · SIGNED RECEIPTS</text>
+  </g>
+</svg>
