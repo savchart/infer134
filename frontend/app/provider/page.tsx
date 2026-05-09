@@ -387,56 +387,6 @@ export default function ProviderDashboard() {
       </section>
 
       <section className="provider-grid">
-        <div className="panel wallet-summary-panel">
-          <div className="kicker">Provider wallet</div>
-          {providerSession ? (
-            <>
-              <span className="status-pill good">wallet signed</span>
-              <p className="muted">
-                Offers will be linked to {providerSession.ens_style_name ?? workerName} at {providerSession.address}.
-              </p>
-            </>
-          ) : (
-            <>
-              <span className="status-pill warn">not connected</span>
-              <p className="muted">Connect the provider wallet from the top-right control before publishing wallet-linked offers.</p>
-            </>
-          )}
-        </div>
-        <div className="panel">
-          <div className="kicker">Authorization Mode</div>
-          <p className="muted">
-            {providerSession
-              ? "Provider offers will be linked to the wallet-authenticated worker address."
-              : "Provider offers can still be previewed in fixture mode, but backend registration will not be wallet-linked."}
-          </p>
-          <p className="muted">
-            Provider-node runtime: {providerRuntime}
-            {providerRuntimeModel ? ` · loaded model: ${providerRuntimeModel}` : ""}
-          </p>
-          <p className="muted">
-            Wallet signature is recorded for the local MVP. Production signer recovery and SIWE are future work.
-          </p>
-        </div>
-      </section>
-
-      <section className="provider-grid">
-        <div className="panel provider-form">
-          <div className="kicker">Identity</div>
-          <label className="field">
-            ENS-style worker name
-            <input value={workerName} onChange={(event) => setWorkerName(event.target.value)} />
-          </label>
-          <label className="field">
-            Worker address
-            <input value={workerAddress} onChange={(event) => setWorkerAddress(event.target.value)} />
-          </label>
-          <label className="field">
-            Provider-node endpoint
-            <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} />
-          </label>
-        </div>
-
         <div className="panel provider-form">
           <div className="kicker">Pricing</div>
           <label className="field">
