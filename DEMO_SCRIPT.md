@@ -2,7 +2,7 @@
 
 ## Goal
 
-Show judges one clear workflow: an AI agent discovers a worker, creates payment state for a job, receives an offchain inference result, verifies an execution receipt, and marks payment as paid.
+Show judges one clear workflow: a buyer signs an escrow transaction in their wallet, the backend verifies it onchain, runs inference offchain, and returns a signed execution receipt — with optional onchain payment release at the end.
 
 ## 0:00-0:20 Problem
 
@@ -10,28 +10,26 @@ AI agents will increasingly buy small units of work from external services. Infe
 
 ## 0:20-0:50 Solution
 
-Infer134 is a pay-per-inference market for agents and companies. Workers execute jobs offchain and return signed execution receipts. The system keeps prompts and outputs private while exposing hashes, worker identity, and payment state as settlement metadata.
+Infer134 is a pay-per-inference market for agents and companies. The buyer's wallet signs an escrow transaction; the backend gates inference on the verified onchain state. Workers execute jobs offchain and return signed execution receipts. Prompts and outputs stay private while hashes, worker identity, and payment state are settlement metadata.
 
 ## 0:50-2:50 Guided UI Flow
 
-Open `/demo`. The MVP is the buyer journey.
+Open `/` and connect a wallet. Sign the auth challenge to enter `/client` — this is the buyer journey.
 
-1. Start as `research-agent.eth`.
-2. Choose a worker-advertised model such as `Qwen/Qwen2.5-0.5B-Instruct` or mock fallback.
-3. Enter the prompt and show `input_hash`.
-4. Select `gpu-prague.eth`.
-5. Create escrow and show payment state `escrowed`.
-6. Run inference and show the offchain output plus `output_hash`.
-7. Verify the execution receipt: input hash, output hash, receipt hash, and signature status.
-8. Release payment and finish with payment state `paid`.
+1. The live `/offers` ticker shows worker `gpu-prague.eth` with its GPU, model, and price.
+2. Pick the offer (e.g. `Qwen/Qwen2.5-0.5B-Instruct` on the local RTX 2070, or the mock fallback).
+3. Type the prompt. The page computes `input_hash = sha256(prompt)` locally.
+4. Click **Pay & run**.
+5. MetaMask asks the buyer to sign `createJob(workerAddress, inputHash){value}` on local Anvil. Confirm.
+6. The page polls for the receipt, parses the `JobCreated` event for `onchain_job_id`, then posts `{onchain_job_id, tx_hash, prompt, offer_id}` to `POST /jobs/run-paid`.
+7. The backend verifies the escrow: status `Created`, `inputHash` matches `sha256(prompt)`, worker matches the offer, the tx receipt's buyer matches the escrow buyer.
+8. Inference runs through provider-node; the backend signs the receipt and submits it onchain via `WORKER_PRIVATE_KEY`.
+9. UI shows the offchain output, hashes, and a phase indicator (`paying → running → ready → released`).
+10. Optional: click **Release payment**, MetaMask signs `releasePayment(uint256)`, ETH leaves the escrow to the worker.
 
-Call out the mode labels. The UI must never silently fake real connectivity:
+Call out the preflight checklist on `/client`: backend up, anvil up, wallet connected, on chain 31337, account matches session. The button is disabled with concrete reasons until every check is green — the UI never silently fakes connectivity.
 
-- `Backend connected` or `Fixture mode: backend unavailable`.
-- `Local Anvil connected` or `Mock settlement: chain unavailable`.
-- `Local worker connected` or `Mock inference: provider-node unavailable`.
-
-Call out that this is the UX Flow bounty angle: complex blockchain concepts are translated into plain buyer actions.
+This is the UX Flow bounty angle: complex blockchain concepts collapse into one button + one signature.
 
 ## 2:50-3:30 API Flow
 
@@ -41,41 +39,40 @@ Run:
 ./scripts/demo_flow.sh
 ```
 
-Narrate the API steps:
+Narrate the API path:
 
-- health check;
-- register worker;
-- create job;
-- list open jobs;
-- claim job;
-- run inference;
-- submit result and execution receipt;
-- mark payment paid;
-- fetch receipt.
+- backend health check;
+- register a worker so an offer is published;
+- list offers;
+- compute `input_hash` for the prompt;
+- `cast send InferenceEscrow.createJob(address,bytes32){value}` from the Anvil dev buyer key;
+- parse `onchain_job_id` from the `JobCreated` log on the tx receipt;
+- `curl POST /jobs/run-paid` with `{onchain_job_id, tx_hash, prompt, offer_id}`;
+- backend returns the result, signed receipt, and the worker's onchain submit tx;
+- `cast send InferenceEscrow.releasePayment(uint256)` to settle the escrow.
 
 ## 3:30-4:25 Architecture and Trust
 
-Explain the architecture:
+Architecture:
 
-- Backend coordinator stores offchain state in memory.
-- Worker node runs deterministic mock inference by default or local vLLM/Hugging Face inference when enabled.
-- Local Anvil contract stores hashes and payment settlement metadata for the escrow narrative.
-- Identity resolver is mocked but isolated behind ENS-style endpoints.
+- Frontend signs both the auth challenge (`personal_sign`) and the escrow transaction (`eth_sendTransaction`) directly via `window.ethereum` — no extra wallet libraries.
+- Backend coordinator stores offchain state in memory, reads onchain `jobs(uint256)` via `cast call` to verify the escrow, runs inference through provider-node, and submits the receipt onchain via the worker key.
+- Worker node runs deterministic mock inference by default or a local vLLM/Hugging Face model when enabled.
+- Local Anvil contract `InferenceEscrow.sol` holds native ETH escrow plus input/output/receipt hashes.
 
 Trust model:
 
-- Hashes prove integrity of stored values, not semantic correctness.
-- Demo signatures prove the worker signed the receipt, not that the model output is correct.
-- Backend is trusted in this MVP.
-- Local GPU/model usage is a worker claim unless future TEE, ZK, or multi-worker verification is added.
+- Verified: input hash, output hash, receipt hash, demo signature consistency, and the buyer-signed escrow on local Anvil.
+- Trusted: backend coordinator, worker's claim about the actual GPU/model, semantic correctness of the output.
+- The wallet auth signature is recorded as evidence but is not run through ECDSA recovery — production replacement is SIWE-grade auth.
 
 ## 4:25-5:00 ETHPrague Fit
 
 Close with:
 
-- Network Economy: identity plus payment-state settlement for independent compute workers.
-- Future Society: privacy-preserving infrastructure for agents and companies to buy compute without exposing sensitive prompts.
-- Umia: agentic workflow with venture path.
-- ENS: agent and worker identities.
-- Privacy by Design: prompts and outputs stay offchain.
-- UX Flow: readable payment and verification states.
+- **Network Economy:** identity, privacy, and onchain-gated payment for an independent worker market.
+- **Future Society:** privacy-preserving infrastructure for agents and companies to buy compute without exposing sensitive prompts.
+- **Umia:** agentic workflow + plausible marketplace revenue path.
+- **ENS:** worker and agent ENS-style identities, ready for real resolution.
+- **Privacy by Design:** prompts and outputs stay offchain; only hashes hit settlement.
+- **UX Flow:** one button, one signature, readable preflight checklist, plain phase indicator.
