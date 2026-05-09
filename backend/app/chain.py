@@ -175,8 +175,8 @@ def verify_escrow_job(onchain_job_id: str) -> dict[str, Any]:
 
 def create_escrow_job(worker: str, input_hash: str) -> dict[str, str]:
     settings = get_chain_settings()
-    if not settings.chain_write_enabled:
-        raise RuntimeError("chain write disabled: RPC_URL, CHAIN_ID, INFERENCE_ESCROW_ADDRESS, BUYER_PRIVATE_KEY, and WORKER_PRIVATE_KEY are required")
+    if not settings.chain_buyer_write_enabled:
+        raise RuntimeError("buyer-side chain write disabled: BUYER_PRIVATE_KEY is required")
 
     next_job_id = _run_cast(
         [
@@ -211,8 +211,8 @@ def create_escrow_job(worker: str, input_hash: str) -> dict[str, str]:
 
 def submit_escrow_result(onchain_job_id: str, output_hash: str, receipt_hash: str) -> dict[str, str]:
     settings = get_chain_settings()
-    if not settings.chain_write_enabled:
-        raise RuntimeError("chain write disabled")
+    if not settings.chain_worker_write_enabled:
+        raise RuntimeError("worker-side chain write disabled: WORKER_PRIVATE_KEY is required")
     output = _run_cast(
         [
             "send",
@@ -236,8 +236,8 @@ def submit_escrow_result(onchain_job_id: str, output_hash: str, receipt_hash: st
 
 def release_escrow_payment(onchain_job_id: str) -> dict[str, str]:
     settings = get_chain_settings()
-    if not settings.chain_write_enabled:
-        raise RuntimeError("chain write disabled")
+    if not settings.chain_buyer_write_enabled:
+        raise RuntimeError("buyer-side chain write disabled: BUYER_PRIVATE_KEY is required")
     output = _run_cast(
         [
             "send",

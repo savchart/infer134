@@ -98,7 +98,12 @@ def get_auth_session(store: InMemoryStore, session_token: str) -> AuthSession:
 def get_role_session(store: InMemoryStore, session_token: str | None, role: AuthRole) -> AuthSession | None:
     if not session_token:
         return None
-    session = get_auth_session(store, session_token)
+    # Stale tokens (e.g. survived a backend restart in this in-memory MVP) are
+    # treated as anonymous so the request can still proceed; callers can issue
+    # a fresh challenge to re-bind the buyer/provider role.
+    session = store.auth_sessions.get(session_token)
+    if session is None:
+        return None
     if session.role != role:
         raise ValueError(f"auth session role must be {role.value}")
     return session

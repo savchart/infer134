@@ -20,8 +20,17 @@ class ChainSettings:
         return bool(self.rpc_url and self.chain_id and self.contract_address)
 
     @property
+    def chain_buyer_write_enabled(self) -> bool:
+        return bool(self.chain_enabled and self.buyer_private_key)
+
+    @property
+    def chain_worker_write_enabled(self) -> bool:
+        return bool(self.chain_enabled and self.worker_private_key)
+
+    @property
     def chain_write_enabled(self) -> bool:
-        return bool(self.chain_enabled and self.buyer_private_key and self.worker_private_key)
+        # Retained for chain_status; reflects "fully wired" mode (agent + worker).
+        return self.chain_buyer_write_enabled and self.chain_worker_write_enabled
 
 
 def get_chain_settings() -> ChainSettings:
