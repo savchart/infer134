@@ -1,28 +1,31 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import type { AuthRole, AuthSession } from "../lib/api";
 import { connectWalletSession, disconnectWalletSession, loadWalletSession } from "../lib/walletAuth";
 
-type WalletConnectProps = {
+type WalletHeaderProps = {
   role?: AuthRole;
   ensStyleName?: string;
   onSessionChange?: (session: AuthSession | undefined) => void;
-  redirectOnDisconnect?: string;
+  title?: string;
+  subtitle?: string;
 };
 
 function shortAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-export function WalletConnect({
+export function WalletHeader({
   role = "client",
   ensStyleName = role === "provider" ? "gpu-prague.eth" : "research-agent.eth",
   onSessionChange,
-  redirectOnDisconnect = "/"
-}: WalletConnectProps) {
+  title = "Infer134",
+  subtitle = "GPU marketplace"
+}: WalletHeaderProps) {
   const router = useRouter();
   const [session, setSession] = useState<AuthSession | undefined>();
   const [status, setStatus] = useState<"idle" | "connecting" | "authenticated" | "unavailable" | "error">("idle");
@@ -36,6 +39,7 @@ export function WalletConnect({
       onSessionChange?.(stored);
       return;
     }
+
     setSession(undefined);
     setStatus("idle");
     onSessionChange?.(undefined);
@@ -63,37 +67,39 @@ export function WalletConnect({
     setStatus("idle");
     setError("");
     onSessionChange?.(undefined);
-    router.push(redirectOnDisconnect);
+    router.push("/");
   }
 
   return (
-    <div className="wallet-card">
-      <div>
-        <div className="kicker">{role === "provider" ? "Provider wallet" : "Client wallet"}</div>
-        <strong>{session?.ens_style_name ?? ensStyleName}</strong>
-      </div>
+    <header className="app-topbar">
+      <Link className="app-brand" href="/">
+        <span className="eyebrow">{title}</span>
+        <strong>{subtitle}</strong>
+      </Link>
 
-      {session ? (
-        <div className="wallet-session">
-          <span className="status-pill good">wallet signed</span>
-          <code>{shortAddress(session.address)}</code>
-          <p className="muted">{session.verification_status}: signer recovery is not production-verified in this MVP.</p>
-          <button className="secondary-button compact" type="button" onClick={disconnect}>
-            Disconnect
-          </button>
+      <div className="wallet-header-control">
+        <div className="wallet-header-main">
+          <span className={session ? "status-pill good" : status === "unavailable" ? "status-pill warn" : "status-pill"}>
+            {session ? "wallet signed" : status}
+          </span>
+          <span className="muted">{role === "provider" ? "provider" : "client"}</span>
+          {session ? <code>{shortAddress(session.address)}</code> : <strong>{ensStyleName}</strong>}
         </div>
-      ) : (
-        <div className="wallet-session">
-          <span className={status === "unavailable" ? "status-pill warn" : "status-pill"}>{status}</span>
-          <p className="muted">
-            Connect a local wallet and sign an Infer134 challenge. Fixture mode remains available when no wallet is connected.
-          </p>
-          {error ? <p className="wallet-error">{error}</p> : null}
-          <button className="primary-button compact" type="button" onClick={connect} disabled={status === "connecting"}>
-            {status === "connecting" ? "Waiting for signature..." : "Connect wallet"}
-          </button>
+
+        <div className="wallet-header-actions">
+          {session ? (
+            <button className="secondary-link action-button" type="button" onClick={disconnect}>
+              Disconnect
+            </button>
+          ) : (
+            <button className="primary-link action-button" type="button" onClick={connect} disabled={status === "connecting"}>
+              {status === "connecting" ? "Signing..." : "Connect wallet"}
+            </button>
+          )}
         </div>
-      )}
-    </div>
+
+        {error ? <p className="wallet-error">{error}</p> : null}
+      </div>
+    </header>
   );
 }
