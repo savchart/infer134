@@ -42,6 +42,15 @@ const selectableGpus: SelectableGpu[] = [
     recommendedFor: "small HF instruct models"
   },
   {
+    gpu_id: "local-mac-cpu",
+    display_name: "Mac CPU",
+    memory_gb: 0,
+    runtime: "vllm",
+    status: "available",
+    notes: "CPU-backed local model server for Macs without an NVIDIA GPU.",
+    recommendedFor: "small HF models through vLLM CPU mode"
+  },
+  {
     gpu_id: "mock-cpu-fallback",
     display_name: "Mock CPU fallback",
     memory_gb: 0,
@@ -159,6 +168,10 @@ export default function ProviderDashboard() {
   const [providerRuntimeModel, setProviderRuntimeModel] = useState("");
   const [providerModels, setProviderModels] = useState<ProviderModel[]>([]);
 
+  function selectedRuntimeIsAvailable(runtime: string) {
+    return selectableGpus.some((gpu) => selectedGpuIds.includes(gpu.gpu_id) && gpu.runtime === runtime);
+  }
+
   function modelAvailability(model: SelectableModel): { enabled: boolean; reason: string } {
     if (providerNodeOnline !== "online") {
       return { enabled: false, reason: "Start provider-node before publishing models." };
@@ -169,6 +182,9 @@ export default function ProviderDashboard() {
         : { enabled: false, reason: "Start provider-node with INFER134_RUNTIME=vllm to publish HF models." };
     }
     if (providerRuntime === "vllm") {
+      if (!selectedRuntimeIsAvailable("vllm")) {
+        return { enabled: false, reason: "Select RTX 2070 or Mac CPU capacity to publish vLLM models." };
+      }
       if (model.model_id === "mock-llama") {
         return { enabled: false, reason: "Mock fallback is only publishable when provider-node runtime is mock." };
       }
@@ -228,7 +244,7 @@ export default function ProviderDashboard() {
       const stillEnabled = current.filter((modelId) => enabledModelIds.includes(modelId));
       return stillEnabled.length ? stillEnabled : enabledModelIds.slice(0, 1);
     });
-  }, [providerModels, providerNodeOnline, providerRuntime]);
+  }, [providerModels, providerNodeOnline, providerRuntime, selectedGpuIds]);
 
   const selectedGpus = useMemo(
     () => (providerNodeOnline === "online" ? selectableGpus.filter((gpu) => selectedGpuIds.includes(gpu.gpu_id)) : []),
@@ -424,6 +440,9 @@ export default function ProviderDashboard() {
           <div className="kicker">Available Models</div>
           <p className="muted">
             Runtime gate: mock runtime can publish only mock-llama. vLLM runtime can publish only HF models marked runtime_ready by provider-node.
+          </p>
+          <p className="muted">
+            Mac CPU can publish Qwen or Smol only when provider-node is running against a real local vLLM CPU server.
           </p>
           <div className="select-card-grid">
             {selectableModels.map((model) => {
