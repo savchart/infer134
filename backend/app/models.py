@@ -269,6 +269,17 @@ class PayJobRequest(BaseModel):
     chain_payment_state: str | None = None
 
 
+class RunPaidJobRequest(BaseModel):
+    onchain_job_id: str
+    tx_hash: str
+    prompt: str
+    offer_id: str
+    model_id: str | None = None
+    buyer_address: str | None = None
+    buyer_name: str = "research-agent.eth"
+    auth_token: str | None = None
+
+
 class AgentTaskRequest(BaseModel):
     task_prompt: str
     buyer_name: str = "research-agent.eth"

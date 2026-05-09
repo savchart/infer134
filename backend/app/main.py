@@ -11,15 +11,11 @@ from app.auth import create_auth_challenge, get_auth_session, logout_auth_sessio
 from app.chain import chain_status
 from app.identity import get_identity_metadata, identity_metadata, resolve_name
 from app.jobs import (
-    create_job,
     get_job,
     list_jobs,
     list_open_jobs,
-    pay_job,
     run_agent_task,
-    run_job,
-    submit_job,
-    claim_job,
+    run_paid_job,
 )
 from app.model_registry import (
     get_model,
@@ -33,14 +29,10 @@ from app.models import (
     AuthChallengeRequest,
     AuthLogoutRequest,
     AuthVerifyRequest,
-    ClaimJobRequest,
-    CreateJobRequest,
     PrepareModelRequest,
-    PayJobRequest,
     RegisterModelRequest,
     RegisterWorkerRequest,
-    RunJobRequest,
-    SubmitJobRequest,
+    RunPaidJobRequest,
 )
 from app.providers import get_worker, list_offers, list_worker_offers, list_workers, register_worker
 from app.receipts import verify_execution_receipt
@@ -227,17 +219,23 @@ def model_endpoint(model_id: str):
         raise _handle_value_error(exc) from exc
 
 
-@app.post("/jobs")
-def create_job_endpoint(request: CreateJobRequest):
+@app.post("/jobs/run-paid")
+def run_paid_job_endpoint(request: RunPaidJobRequest):
     try:
-        job = create_job(STORE, request)
-        return {
-            "job": job,
-            "payment_explanation": "payment required -> mocked payment state accepted",
-            "offchain": ["prompt", "result", "full receipt"],
-            "hashable_metadata": ["input_hash", "output_hash", "receipt_hash", "worker", "price", "payment_state"],
-            "demo_modes": _demo_modes(),
-        }
+        result = run_paid_job(STORE, request)
+        result["demo_modes"] = _demo_modes()
+        result["offchain"] = ["prompt", "result", "full receipt"]
+        result["hashable_metadata"] = [
+            "input_hash",
+            "output_hash",
+            "receipt_hash",
+            "worker",
+            "price",
+            "payment_state",
+        ]
+        return result
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -262,52 +260,6 @@ def job_endpoint(job_id: str):
             "hashable_metadata": ["input_hash", "output_hash", "receipt_hash", "worker", "price", "payment_state"],
             "demo_modes": _demo_modes(),
         }
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
-
-
-@app.post("/jobs/{job_id}/claim")
-def claim_job_endpoint(job_id: str, request: ClaimJobRequest):
-    try:
-        return claim_job(STORE, job_id, request)
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
-
-
-@app.post("/jobs/{job_id}/run")
-def run_job_endpoint(job_id: str, request: RunJobRequest = RunJobRequest()):
-    try:
-        result = run_job(STORE, job_id, request)
-        result["demo_modes"] = _demo_modes()
-        return result
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
-
-
-@app.post("/jobs/{job_id}/submit")
-def submit_job_endpoint(job_id: str, request: SubmitJobRequest = SubmitJobRequest()):
-    try:
-        result = submit_job(STORE, job_id, request)
-        result["demo_modes"] = _demo_modes()
-        return result
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
-
-
-@app.post("/jobs/{job_id}/complete")
-def legacy_complete_job_endpoint(job_id: str, request: SubmitJobRequest = SubmitJobRequest()):
-    try:
-        return submit_job(STORE, job_id, request)
-    except ValueError as exc:
-        raise _handle_value_error(exc) from exc
-
-
-@app.post("/jobs/{job_id}/pay")
-def pay_job_endpoint(job_id: str, request: PayJobRequest = PayJobRequest()):
-    try:
-        result = pay_job(STORE, job_id, request)
-        result["demo_modes"] = _demo_modes()
-        return result
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -339,5 +291,7 @@ def receipt_endpoint(job_id: str):
 def agent_task_endpoint(request: AgentTaskRequest):
     try:
         return run_agent_task(STORE, request)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise _handle_value_error(exc) from exc

@@ -89,6 +89,90 @@ def _normalize_bytes32(value: str) -> str:
     raise ValueError(f"expected bytes32 hex value, got: {value}")
 
 
+# keccak256("JobCreated(uint256,address,address,bytes32,uint256)")
+JOB_CREATED_TOPIC0 = "0x08e6e98d4b4e6cb7a4c98fc40a1dfde1d3a6661db3ad3e5d23b43219896489ec"
+
+ESCROW_STATUS_LABELS = {
+    0: "created",
+    1: "result_submitted",
+    2: "paid",
+    3: "cancelled",
+}
+
+
+def _topic_to_address(topic: str) -> str:
+    return "0x" + topic[-40:]
+
+
+def _topic_to_uint(topic: str) -> int:
+    return int(topic, 16)
+
+
+def parse_job_created_event(tx_hash: str) -> dict[str, Any]:
+    """Read a JobCreated log from the given tx receipt and return its fields."""
+    settings = get_chain_settings()
+    if not settings.chain_enabled:
+        raise RuntimeError("chain not enabled: set RPC_URL, CHAIN_ID, INFERENCE_ESCROW_ADDRESS")
+    receipt = _rpc_call(settings.rpc_url or "", "eth_getTransactionReceipt", [tx_hash])
+    if not receipt:
+        raise ValueError(f"tx receipt not found: {tx_hash}")
+    if int(receipt.get("status", "0x0"), 16) != 1:
+        raise ValueError(f"tx not mined or reverted: {tx_hash}")
+    contract_address = (settings.contract_address or "").lower()
+    for log in receipt.get("logs", []):
+        if log.get("address", "").lower() != contract_address:
+            continue
+        topics = log.get("topics", [])
+        if not topics or topics[0].lower() != JOB_CREATED_TOPIC0.lower():
+            continue
+        if len(topics) < 4:
+            continue
+        return {
+            "onchain_job_id": str(_topic_to_uint(topics[1])),
+            "buyer": _topic_to_address(topics[2]),
+            "worker": _topic_to_address(topics[3]),
+            "tx_hash": tx_hash,
+            "block_number": int(log.get("blockNumber", "0x0"), 16),
+        }
+    raise ValueError(f"JobCreated event not found in tx logs: {tx_hash}")
+
+
+def verify_escrow_job(onchain_job_id: str) -> dict[str, Any]:
+    """Read jobs(uint256) on the escrow contract for the given job id."""
+    settings = get_chain_settings()
+    if not settings.chain_enabled:
+        raise RuntimeError("chain not enabled: set RPC_URL, CHAIN_ID, INFERENCE_ESCROW_ADDRESS")
+    raw = _run_cast(
+        [
+            "call",
+            settings.contract_address or "",
+            "jobs(uint256)(address,address,uint256,uint256,bytes32,bytes32,bytes32,uint8)",
+            str(onchain_job_id),
+            "--rpc-url",
+            settings.rpc_url or "",
+        ]
+    )
+    parts = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(parts) < 8:
+        raise ValueError(f"unexpected jobs() output: {raw}")
+    buyer, worker, escrow_amount, requested_payment, input_hash, output_hash, receipt_hash, status_raw = parts[:8]
+    status_int = int(status_raw.split()[0])
+    if buyer.lower() == "0x0000000000000000000000000000000000000000":
+        raise ValueError(f"escrow job not found onchain: {onchain_job_id}")
+    return {
+        "onchain_job_id": str(onchain_job_id),
+        "buyer": buyer,
+        "worker": worker,
+        "escrow_amount": int(escrow_amount.split()[0]),
+        "requested_payment": int(requested_payment.split()[0]),
+        "input_hash": input_hash,
+        "output_hash": output_hash,
+        "receipt_hash": receipt_hash,
+        "status_code": status_int,
+        "status": ESCROW_STATUS_LABELS.get(status_int, f"unknown({status_int})"),
+    }
+
+
 def create_escrow_job(worker: str, input_hash: str) -> dict[str, str]:
     settings = get_chain_settings()
     if not settings.chain_write_enabled:
