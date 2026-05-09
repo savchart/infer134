@@ -2,6 +2,27 @@ import type { DemoModel } from "./demoData";
 
 const API_PROXY_BASE_URL = "/api/infer134";
 
+export type RunPaidJobRequest = {
+  onchain_job_id: string;
+  tx_hash: string;
+  prompt: string;
+  offer_id: string;
+  model_id?: string;
+  buyer_address?: string;
+  buyer_name?: string;
+  auth_token?: string;
+};
+
+export type RunPaidJobResponse = {
+  job: BackendJob;
+  receipt: ReceiptPayload;
+  receipt_verified: boolean;
+  verification: unknown;
+  settlement_metadata: Record<string, unknown>;
+  escrow_amount_wei: string;
+  demo_modes?: Record<string, boolean>;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_PROXY_BASE_URL}${path}`, {
     ...init,
@@ -305,51 +326,11 @@ export function registerWorker(model: DemoModel, authToken?: string) {
   });
 }
 
-export function createJob(prompt: string, modelId = "mock-llama", authToken?: string, price = "0.001 local ETH") {
-  return request<{ job: BackendJob }>("/jobs", {
+export function runPaidJob(payload: RunPaidJobRequest) {
+  return request<RunPaidJobResponse>("/jobs/run-paid", {
     method: "POST",
-    body: JSON.stringify({
-      prompt,
-      buyer_name: "research-agent.eth",
-      model_id: modelId,
-      price,
-      auth_token: authToken
-    })
+    body: JSON.stringify(payload)
   });
-}
-
-export function claimJob(jobId: string, workerId: string) {
-  return request<BackendJob>(`/jobs/${jobId}/claim`, {
-    method: "POST",
-    body: JSON.stringify({ worker_id: workerId })
-  });
-}
-
-export function runJob(jobId: string, workerId: string) {
-  return request<{ job: BackendJob; inference: Record<string, unknown> }>(`/jobs/${jobId}/run`, {
-    method: "POST",
-    body: JSON.stringify({ worker_id: workerId })
-  });
-}
-
-export function submitJob(jobId: string) {
-  return request<{ job: BackendJob; receipt: ReceiptPayload; receipt_verified: boolean; verification: unknown }>(
-    `/jobs/${jobId}/submit`,
-    {
-      method: "POST",
-      body: JSON.stringify({})
-    }
-  );
-}
-
-export function payJob(jobId: string) {
-  return request<{ job: BackendJob; receipt?: ReceiptPayload | null; receipt_verified?: boolean }>(
-    `/jobs/${jobId}/pay`,
-    {
-      method: "POST",
-      body: JSON.stringify({})
-    }
-  );
 }
 
 export function getReceipt(jobId: string) {
