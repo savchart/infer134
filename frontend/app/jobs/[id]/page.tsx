@@ -23,7 +23,6 @@ export default function JobPage({ params }: JobPageProps) {
         <div className="nav-links">
           <Link href="/">Buyer</Link>
           <Link href="/provider">Worker</Link>
-          <Link href="/agent">Agent</Link>
         </div>
       </nav>
 

@@ -370,7 +370,6 @@ export default function ProviderDashboard() {
         </div>
         <div className="nav-links">
           <Link href="/client">Buyer marketplace</Link>
-          <Link href="/agent">Agent</Link>
         </div>
       </nav>
 
