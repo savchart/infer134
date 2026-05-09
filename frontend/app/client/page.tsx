@@ -300,10 +300,8 @@ export default function ClientMarketplacePage() {
                     <p>{offer.gpu_name} · {offer.gpu_memory_gb} GB · {offer.runtime}</p>
                     <code>{offer.model_id}</code>
                     <dl>
-                      <dt>Input</dt>
+                      <dt>Price</dt>
                       <dd>{offer.price_per_1m_input_tokens} / 1M tokens</dd>
-                      <dt>Output</dt>
-                      <dd>{offer.price_per_1m_output_tokens} / 1M tokens</dd>
                       <dt>Request fee</dt>
                       <dd>{offer.inference_fee}</dd>
                     </dl>

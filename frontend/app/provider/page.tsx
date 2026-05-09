@@ -98,9 +98,7 @@ function toggleValue(values: string[], value: string) {
 
 function capabilityFromModel(
   model: SelectableModel,
-  pricePerInput: string,
-  pricePerOutput: string,
-  coldStartFee: string
+  tokenPrice: string
 ): WorkerModelCapability {
   return {
     model_id: model.model_id,
@@ -109,10 +107,10 @@ function capabilityFromModel(
     model_hash: model.model_hash,
     runtime: model.runtime,
     readiness_state: "ready",
-    cold_start_fee: coldStartFee,
-    inference_fee: pricePerOutput,
-    price_per_1m_input_tokens: pricePerInput,
-    price_per_1m_output_tokens: pricePerOutput,
+    cold_start_fee: "0 local ETH",
+    inference_fee: tokenPrice,
+    price_per_1m_input_tokens: tokenPrice,
+    price_per_1m_output_tokens: tokenPrice,
     currency: "local ETH"
   };
 }
@@ -157,9 +155,7 @@ export default function ProviderDashboard() {
   const [endpoint, setEndpoint] = useState("http://127.0.0.1:8010");
   const [selectedGpuIds, setSelectedGpuIds] = useState<string[]>(["local-rtx-2070"]);
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>(["Qwen/Qwen2.5-0.5B-Instruct"]);
-  const [pricePerInput, setPricePerInput] = useState("0.25 local ETH");
-  const [pricePerOutput, setPricePerOutput] = useState("0.75 local ETH");
-  const [coldStartFee, setColdStartFee] = useState("0 local ETH");
+  const [tokenPrice, setTokenPrice] = useState("0.25 local ETH");
   const [publishedOffers, setPublishedOffers] = useState<WorkerOffer[]>([]);
   const [notice, setNotice] = useState("Configure an offer draft, then publish it for buyers.");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -277,8 +273,8 @@ export default function ProviderDashboard() {
     [providerModels, providerNodeOnline, providerRuntime, selectedModelIds]
   );
   const modelCapabilities = useMemo(
-    () => selectedModels.map((model) => capabilityFromModel(model, pricePerInput, pricePerOutput, coldStartFee)),
-    [coldStartFee, pricePerInput, pricePerOutput, selectedModels]
+    () => selectedModels.map((model) => capabilityFromModel(model, tokenPrice)),
+    [selectedModels, tokenPrice]
   );
   const previewOffers = useMemo(
     () => fixtureOffers(workerName, workerAddress, endpoint, selectedGpus, modelCapabilities),
@@ -300,9 +296,7 @@ export default function ProviderDashboard() {
     setEndpoint(offer.endpoint);
     setSelectedGpuIds([offer.gpu_id]);
     setSelectedModelIds([offer.model_id]);
-    setPricePerInput(offer.price_per_1m_input_tokens);
-    setPricePerOutput(offer.price_per_1m_output_tokens);
-    setColdStartFee(offer.cold_start_fee);
+    setTokenPrice(offer.price_per_1m_input_tokens);
     setNotice(`Editing ${offer.gpu_name} + ${offer.model_id}. Save changes to update the buyer-visible offer.`);
   }
 
@@ -318,7 +312,7 @@ export default function ProviderDashboard() {
       address: workerAddress,
       model: modelCapabilities[0]?.model_id ?? "mock-llama",
       hardware: selectedGpus.map((gpu) => gpu.display_name).join(", ") || "not selected",
-      price: pricePerOutput,
+      price: tokenPrice,
       status: "available",
       endpoint,
       gpu_capabilities: selectedGpus,
@@ -390,16 +384,8 @@ export default function ProviderDashboard() {
         <div className="panel provider-form">
           <div className="kicker">Pricing</div>
           <label className="field">
-            Input price / 1M tokens
-            <input value={pricePerInput} onChange={(event) => setPricePerInput(event.target.value)} />
-          </label>
-          <label className="field">
-            Output price / 1M tokens
-            <input value={pricePerOutput} onChange={(event) => setPricePerOutput(event.target.value)} />
-          </label>
-          <label className="field">
-            Cold-start fee
-            <input value={coldStartFee} onChange={(event) => setColdStartFee(event.target.value)} />
+            Price / 1M tokens
+            <input value={tokenPrice} onChange={(event) => setTokenPrice(event.target.value)} />
           </label>
         </div>
       </section>
@@ -503,12 +489,8 @@ export default function ProviderDashboard() {
               <p className="muted">{offer.gpu_name} · {offer.gpu_memory_gb} GB · {offer.runtime}</p>
               <code>{offer.model_id}</code>
               <dl>
-                <dt>Input</dt>
+                <dt>Price</dt>
                 <dd>{offer.price_per_1m_input_tokens} / 1M tokens</dd>
-                <dt>Output</dt>
-                <dd>{offer.price_per_1m_output_tokens} / 1M tokens</dd>
-                <dt>Cold start</dt>
-                <dd>{offer.cold_start_fee}</dd>
               </dl>
             </article>
           ))}
@@ -538,12 +520,8 @@ export default function ProviderDashboard() {
                 <p className="muted">{offer.gpu_name} · {offer.gpu_memory_gb} GB · {offer.runtime}</p>
                 <code>{offer.model_id}</code>
                 <dl>
-                  <dt>Input</dt>
+                  <dt>Price</dt>
                   <dd>{offer.price_per_1m_input_tokens} / 1M tokens</dd>
-                  <dt>Output</dt>
-                  <dd>{offer.price_per_1m_output_tokens} / 1M tokens</dd>
-                  <dt>Cold start</dt>
-                  <dd>{offer.cold_start_fee}</dd>
                 </dl>
                 <button className="button secondary" onClick={() => editOffer(offer)} type="button">
                   Edit

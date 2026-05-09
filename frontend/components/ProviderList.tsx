@@ -96,7 +96,7 @@ export function ProviderList({
               {offer.gpu_name} · {offer.gpu_memory_gb} GB · {offer.model_id}
             </p>
             <p className="muted">
-              Input {offer.price_per_1m_input_tokens} / 1M · Output {offer.price_per_1m_output_tokens} / 1M
+              Price {offer.price_per_1m_input_tokens} / 1M tokens
             </p>
             <span className="badge">{offer.worker_status}</span>
           </div>
