@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  getOffers,
   getProviderHealth,
   getProviderModels,
   getWorkerOffers,
@@ -159,9 +160,10 @@ export default function ProviderDashboard() {
   const [pricePerInput, setPricePerInput] = useState("0.25 local ETH");
   const [pricePerOutput, setPricePerOutput] = useState("0.75 local ETH");
   const [coldStartFee, setColdStartFee] = useState("0 local ETH");
-  const [offers, setOffers] = useState<WorkerOffer[]>([]);
-  const [notice, setNotice] = useState("Configure GPU + model bundles, then register worker offers.");
+  const [publishedOffers, setPublishedOffers] = useState<WorkerOffer[]>([]);
+  const [notice, setNotice] = useState("Configure an offer draft, then publish it for buyers.");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
   const [providerSession, setProviderSession] = useState<AuthSession | undefined>();
   const [providerNodeOnline, setProviderNodeOnline] = useState<"checking" | "online" | "offline">("checking");
   const [providerRuntime, setProviderRuntime] = useState("checking");
@@ -232,6 +234,26 @@ export default function ProviderDashboard() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    getOffers()
+      .then((backendOffers) => {
+        if (mounted) {
+          setPublishedOffers(backendOffers);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setPublishedOffers([]);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (providerNodeOnline !== "online") {
       setSelectedModelIds([]);
       return;
@@ -262,6 +284,27 @@ export default function ProviderDashboard() {
     () => fixtureOffers(workerName, workerAddress, endpoint, selectedGpus, modelCapabilities),
     [endpoint, modelCapabilities, selectedGpus, workerAddress, workerName]
   );
+  const isEditingOffer = editingOfferId !== null;
+  const draftHeading = isEditingOffer ? "Editing Offer" : "Offer Draft";
+  const submitLabel = isSubmitting ? (isEditingOffer ? "Saving..." : "Publishing...") : isEditingOffer ? "Save changes" : "Publish offer";
+
+  function cancelEdit() {
+    setEditingOfferId(null);
+    setNotice("Editing cancelled. Configure a new offer draft or choose another published offer.");
+  }
+
+  function editOffer(offer: WorkerOffer) {
+    setEditingOfferId(offer.offer_id);
+    setWorkerName(offer.worker_name);
+    setWorkerAddress(offer.worker_address);
+    setEndpoint(offer.endpoint);
+    setSelectedGpuIds([offer.gpu_id]);
+    setSelectedModelIds([offer.model_id]);
+    setPricePerInput(offer.price_per_1m_input_tokens);
+    setPricePerOutput(offer.price_per_1m_output_tokens);
+    setColdStartFee(offer.cold_start_fee);
+    setNotice(`Editing ${offer.gpu_name} + ${offer.model_id}. Save changes to update the buyer-visible offer.`);
+  }
 
   async function registerWorkerOffers() {
     if (providerNodeOnline !== "online") {
@@ -286,12 +329,16 @@ export default function ProviderDashboard() {
     try {
       const worker = await registerWorkerProfile(payload);
       const backendOffers = await getWorkerOffers(worker.worker_id);
-      setOffers(backendOffers);
-      setNotice(`Backend connected. Published or updated ${backendOffers.length} selectable GPU + model offers.`);
-    } catch (error) {
-      setOffers(previewOffers);
+      setPublishedOffers(await getOffers());
       setNotice(
-        `Fixture preview: backend unavailable or registration failed. ${
+        isEditingOffer
+          ? `Offer updated. Buyers will see the latest settings for ${backendOffers.length} GPU + model bundle.`
+          : `Offer published. Buyers can now select ${backendOffers.length} GPU + model bundle.`
+      );
+      setEditingOfferId(null);
+    } catch (error) {
+      setNotice(
+        `Draft not published: backend unavailable or registration failed. ${
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
@@ -478,23 +525,30 @@ export default function ProviderDashboard() {
       <section className="panel">
         <div className="offer-header">
           <div>
-            <div className="kicker">Offer Preview</div>
-            <h2>Selectable bundles for buyers</h2>
+            <div className="kicker">{draftHeading}</div>
+            <h2>Buyer-visible compute bundle</h2>
           </div>
-          <button
-            className="button"
-            disabled={providerNodeOnline !== "online" || !selectedGpus.length || !selectedModels.length || isSubmitting}
-            onClick={registerWorkerOffers}
-            type="button"
-          >
-            {isSubmitting ? "Publishing..." : "Publish or update worker offers"}
-          </button>
+          <div className="offer-actions">
+            {isEditingOffer ? (
+              <button className="button secondary" disabled={isSubmitting} onClick={cancelEdit} type="button">
+                Cancel edit
+              </button>
+            ) : null}
+            <button
+              className="button"
+              disabled={providerNodeOnline !== "online" || !selectedGpus.length || !selectedModels.length || isSubmitting}
+              onClick={registerWorkerOffers}
+              type="button"
+            >
+              {submitLabel}
+            </button>
+          </div>
         </div>
 
         <div className="offer-grid">
-          {(offers.length ? offers : previewOffers).map((offer) => (
+          {previewOffers.map((offer) => (
             <article className="offer-card" key={offer.offer_id}>
-              <span className="badge">{offer.worker_status}</span>
+              <span className="badge">draft</span>
               <h3>{offer.worker_name}</h3>
               <p className="muted">{offer.gpu_name} · {offer.gpu_memory_gb} GB · {offer.runtime}</p>
               <code>{offer.model_id}</code>
@@ -509,6 +563,45 @@ export default function ProviderDashboard() {
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="offer-header">
+          <div>
+            <div className="kicker">Published Offers</div>
+            <h2>Live offers buyers can select</h2>
+          </div>
+          <span className="status-pill good">{publishedOffers.length} live</span>
+        </div>
+
+        {!publishedOffers.length ? (
+          <div className="empty-offers">
+            <strong>No published offers yet</strong>
+            <p>Publish the current offer draft to make a GPU + model bundle visible in the buyer marketplace.</p>
+          </div>
+        ) : (
+          <div className="offer-grid">
+            {publishedOffers.map((offer) => (
+              <article className="offer-card" key={offer.offer_id}>
+                <span className="badge">{editingOfferId === offer.offer_id ? "editing" : offer.worker_status}</span>
+                <h3>{offer.worker_name}</h3>
+                <p className="muted">{offer.gpu_name} · {offer.gpu_memory_gb} GB · {offer.runtime}</p>
+                <code>{offer.model_id}</code>
+                <dl>
+                  <dt>Input</dt>
+                  <dd>{offer.price_per_1m_input_tokens} / 1M tokens</dd>
+                  <dt>Output</dt>
+                  <dd>{offer.price_per_1m_output_tokens} / 1M tokens</dd>
+                  <dt>Cold start</dt>
+                  <dd>{offer.cold_start_fee}</dd>
+                </dl>
+                <button className="button secondary" onClick={() => editOffer(offer)} type="button">
+                  Edit
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
     </main>
   );
