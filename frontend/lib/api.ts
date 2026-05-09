@@ -1,5 +1,3 @@
-import type { DemoModel } from "./demoData";
-
 const API_PROXY_BASE_URL = "/api/infer134";
 
 export type RunPaidJobRequest = {
@@ -310,60 +308,9 @@ export function getWorkerOffers(workerId: string) {
   return request<WorkerOffer[]>(`/workers/${workerId}/offers`);
 }
 
-export function registerWorker(model: DemoModel, authToken?: string) {
-  return registerWorkerProfile({
-      name: "gpu-prague.eth",
-      address: "0x2000000000000000000000000000000000000002",
-      model: model.modelId,
-      hardware: "local GPU worker / mock fallback",
-      price: "0.001 local ETH / request",
-      status: "available",
-      endpoint: "http://127.0.0.1:8010",
-      gpu_capabilities: [
-        {
-          gpu_id: "local-rtx-2070",
-          display_name: "NVIDIA RTX 2070",
-          memory_gb: 8,
-          runtime: model.runtime.includes("vLLM") ? "vllm" : "mock",
-          status: "available",
-          notes: "Demo GPU selected by the worker."
-        }
-      ],
-      model_capabilities: [
-        {
-          model_id: model.modelId,
-          model_source: model.source === "local mock" ? "worker_catalog" : "public_registry",
-          model_revision: "main",
-          model_hash: model.modelHash,
-          runtime: model.runtime,
-          readiness_state: "ready",
-          cold_start_fee: "0 local ETH",
-          inference_fee: "0.001 local ETH",
-          price_per_1m_input_tokens: "0.25 local ETH",
-          price_per_1m_output_tokens: "0.75 local ETH",
-          currency: "local ETH"
-        }
-      ],
-      auth_token: authToken
-  });
-}
-
 export function runPaidJob(payload: RunPaidJobRequest) {
   return request<RunPaidJobResponse>("/jobs/run-paid", {
     method: "POST",
     body: JSON.stringify(payload)
-  });
-}
-
-export function getReceipt(jobId: string) {
-  return request<{ receipt: ReceiptPayload; receipt_verified: boolean; verification: unknown }>(
-    `/jobs/${jobId}/receipt`
-  );
-}
-
-export function runAgentTask(taskPrompt: string) {
-  return request("/agent/tasks", {
-    method: "POST",
-    body: JSON.stringify({ task_prompt: taskPrompt })
   });
 }

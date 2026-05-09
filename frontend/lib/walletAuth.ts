@@ -7,13 +7,6 @@ import {
   type AuthSession
 } from "./api";
 
-export type WalletAuthState = {
-  status: "idle" | "connecting" | "authenticated" | "unavailable" | "error";
-  address?: string;
-  session?: AuthSession;
-  error?: string;
-};
-
 type EthereumProvider = {
   request<T = unknown>(args: { method: string; params?: unknown[] }): Promise<T>;
   on?: (event: string, handler: (...args: unknown[]) => void) => void;

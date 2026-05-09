@@ -224,51 +224,6 @@ class PrepareModelRequest(BaseModel):
     inference_fee: str = "0.02 USDC"
 
 
-class CreateJobRequest(BaseModel):
-    prompt: str
-    buyer_name: str = "research-agent.eth"
-    buyer_address: str | None = None
-    worker_id: str | None = None
-    model_id: str = "mock-llama"
-    price: str | None = None
-    onchain_job_id: str | None = None
-    onchain_tx_hash_create: str | None = None
-    chain_payment_state: str | None = None
-    auth_token: str | None = None
-
-
-class ClaimJobRequest(BaseModel):
-    worker_id: str
-
-
-class RunJobRequest(BaseModel):
-    worker_id: str | None = None
-
-
-class SubmitJobRequest(BaseModel):
-    output: str | None = None
-    output_hash: str | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    model: str | None = None
-    model_id: str | None = None
-    model_source: ModelSourceType | None = None
-    model_revision: str | None = None
-    model_hash: str | None = None
-    adapter_hash: str | None = None
-    runtime: str | None = None
-    cold_start_fee: str | None = None
-    inference_fee: str | None = None
-    onchain_tx_hash_submit: str | None = None
-    chain_payment_state: str | None = None
-
-
-class PayJobRequest(BaseModel):
-    note: str = "mock buyer release"
-    onchain_tx_hash_release: str | None = None
-    chain_payment_state: str | None = None
-
-
 class RunPaidJobRequest(BaseModel):
     onchain_job_id: str
     tx_hash: str
