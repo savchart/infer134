@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getOffers,
@@ -165,6 +165,8 @@ export default function ProviderDashboard() {
   const [providerRuntime, setProviderRuntime] = useState("checking");
   const [providerRuntimeModel, setProviderRuntimeModel] = useState("");
   const [providerModels, setProviderModels] = useState<ProviderModel[]>([]);
+  const pricingSectionRef = useRef<HTMLDivElement | null>(null);
+  const priceInputRef = useRef<HTMLInputElement | null>(null);
 
   function selectedRuntimeIsAvailable(runtime: string) {
     return selectableGpus.some((gpu) => selectedGpuIds.includes(gpu.gpu_id) && gpu.runtime === runtime);
@@ -297,6 +299,11 @@ export default function ProviderDashboard() {
     setSelectedModelIds([offer.model_id]);
     setTokenPrice(offer.price_per_1m_input_tokens);
     setNotice(`Editing ${offer.gpu_name} + ${offer.model_id}. Save changes to update the buyer-visible offer.`);
+    window.setTimeout(() => {
+      pricingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      priceInputRef.current?.focus();
+      priceInputRef.current?.select();
+    }, 0);
   }
 
   async function registerWorkerOffers() {
@@ -379,12 +386,12 @@ export default function ProviderDashboard() {
         {notice ? <div className="notice">{notice}</div> : null}
       </section>
 
-      <section className="provider-grid">
+      <section className="provider-grid" ref={pricingSectionRef}>
         <div className="panel provider-form">
           <div className="kicker">Pricing</div>
           <label className="field">
             Price / 1M tokens
-            <input value={tokenPrice} onChange={(event) => setTokenPrice(event.target.value)} />
+            <input ref={priceInputRef} value={tokenPrice} onChange={(event) => setTokenPrice(event.target.value)} />
           </label>
         </div>
       </section>
