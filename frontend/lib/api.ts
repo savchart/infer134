@@ -21,6 +21,19 @@ export type RunPaidJobResponse = {
   demo_modes?: Record<string, boolean>;
 };
 
+export type RunSessionJobRequest = {
+  session_id: string;
+  prompt: string;
+  offer_id: string;
+  model_id?: string;
+  buyer_address?: string;
+  buyer_name?: string;
+  auth_token?: string;
+  escrow_amount_wei: string;
+};
+
+export type RunSessionJobResponse = RunPaidJobResponse;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_PROXY_BASE_URL}${path}`, {
     ...init,
@@ -209,6 +222,8 @@ export type BackendJob = {
   onchain_tx_hash_release?: string | null;
   chain_payment_state?: string | null;
   auth_verification_status?: string | null;
+  input_tokens?: number;
+  output_tokens?: number;
 };
 
 export type ReceiptPayload = {
@@ -310,6 +325,13 @@ export function getWorkerOffers(workerId: string) {
 
 export function runPaidJob(payload: RunPaidJobRequest) {
   return request<RunPaidJobResponse>("/jobs/run-paid", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function runSessionJob(payload: RunSessionJobRequest) {
+  return request<RunSessionJobResponse>("/jobs/run-session", {
     method: "POST",
     body: JSON.stringify(payload)
   });

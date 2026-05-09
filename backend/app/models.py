@@ -235,6 +235,17 @@ class RunPaidJobRequest(BaseModel):
     auth_token: str | None = None
 
 
+class RunSessionJobRequest(BaseModel):
+    session_id: str
+    prompt: str
+    offer_id: str
+    model_id: str | None = None
+    buyer_address: str | None = None
+    buyer_name: str = "research-agent.eth"
+    auth_token: str | None = None
+    escrow_amount_wei: str = "0"
+
+
 class AgentTaskRequest(BaseModel):
     task_prompt: str
     buyer_name: str = "research-agent.eth"

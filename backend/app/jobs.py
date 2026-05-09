@@ -23,6 +23,7 @@ from app.models import (
     JobStatus,
     PaymentState,
     RunPaidJobRequest,
+    RunSessionJobRequest,
 )
 from app.providers import ensure_default_worker, get_worker, list_offers
 from app.receipts import build_execution_receipt, sha256_hex, verify_execution_receipt
@@ -151,6 +152,7 @@ def _execute_paid_job(
     buyer_name: str,
     auth_session_token: str | None,
     auth_verification_status: str | None,
+    submit_onchain: bool = True,
 ) -> dict[str, Any]:
     """Build the local Job, run inference, submit on-chain, return the full payload."""
     capability = get_worker_model_capability(worker, offer.model_id)
@@ -206,12 +208,15 @@ def _execute_paid_job(
     job.worker_signature = receipt.signature
     job.receipt_verified = bool(verification["verified"])
 
-    try:
-        chain_result = submit_escrow_result(job.onchain_job_id, job.output_hash, job.receipt_hash)
-        job.onchain_tx_hash_submit = chain_result["tx_hash"]
-        job.chain_payment_state = chain_result["chain_payment_state"]
-    except Exception as exc:  # noqa: BLE001 - surface as job-level chain failure
-        job.chain_payment_state = f"submit_failed: {exc}"
+    if submit_onchain:
+        try:
+            chain_result = submit_escrow_result(job.onchain_job_id, job.output_hash, job.receipt_hash)
+            job.onchain_tx_hash_submit = chain_result["tx_hash"]
+            job.chain_payment_state = chain_result["chain_payment_state"]
+        except Exception as exc:  # noqa: BLE001 - surface as job-level chain failure
+            job.chain_payment_state = f"submit_failed: {exc}"
+    else:
+        job.chain_payment_state = "session_ledger"
 
     job.status = JobStatus.SUBMITTED
     job.payment_state = PaymentState.PAYABLE
@@ -284,6 +289,48 @@ def run_paid_job(store: InMemoryStore, request: RunPaidJobRequest) -> dict[str, 
         auth_session_token=auth_session.session_token if auth_session else None,
         auth_verification_status=auth_session.verification_status if auth_session else None,
     )
+
+
+def run_session_job(store: InMemoryStore, request: RunSessionJobRequest) -> dict[str, Any]:
+    """Run inference for an already-booked GPU session without creating a new onchain job."""
+    offer = _find_offer(store, request.offer_id)
+    worker = get_worker(store, offer.worker_id)
+
+    if request.model_id and request.model_id != offer.model_id:
+        raise ValueError(f"model_id mismatch: offer is {offer.model_id}, request says {request.model_id}")
+
+    auth_session = get_role_session(store, request.auth_token, AuthRole.CLIENT)
+    buyer = auth_session.address if auth_session else (request.buyer_address or "session-buyer")
+    buyer_name = (
+        auth_session.ens_style_name
+        if auth_session and auth_session.ens_style_name
+        else request.buyer_name
+    )
+
+    try:
+        escrow_amount = int(request.escrow_amount_wei)
+    except ValueError as exc:
+        raise ValueError("escrow_amount_wei must be an integer string") from exc
+
+    payload = _execute_paid_job(
+        store,
+        prompt=request.prompt,
+        offer=offer,
+        worker=worker,
+        onchain_job_id=request.session_id,
+        onchain_tx_hash="session-ledger",
+        escrow_amount=max(0, escrow_amount),
+        buyer=buyer,
+        buyer_name=buyer_name,
+        auth_session_token=auth_session.session_token if auth_session else None,
+        auth_verification_status=auth_session.verification_status if auth_session else None,
+        submit_onchain=False,
+    )
+
+    job: Job = payload["job"]
+    store.jobs[job.job_id] = job
+    payload["settlement_metadata"]["mode"] = "escrow_session_ledger"
+    return payload
 
 
 def run_agent_task(store: InMemoryStore, request: AgentTaskRequest) -> dict[str, Any]:

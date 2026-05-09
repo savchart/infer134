@@ -16,6 +16,7 @@ from app.jobs import (
     list_open_jobs,
     run_agent_task,
     run_paid_job,
+    run_session_job,
 )
 from app.model_registry import (
     get_model,
@@ -33,6 +34,7 @@ from app.models import (
     RegisterModelRequest,
     RegisterWorkerRequest,
     RunPaidJobRequest,
+    RunSessionJobRequest,
 )
 from app.providers import get_worker, list_offers, list_worker_offers, list_workers, register_worker
 from app.receipts import verify_execution_receipt
@@ -236,6 +238,25 @@ def run_paid_job_endpoint(request: RunPaidJobRequest):
         return result
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@app.post("/jobs/run-session")
+def run_session_job_endpoint(request: RunSessionJobRequest):
+    try:
+        result = run_session_job(STORE, request)
+        result["demo_modes"] = _demo_modes()
+        result["offchain"] = ["prompt", "result", "full receipt", "session escrow ledger"]
+        result["hashable_metadata"] = [
+            "input_hash",
+            "output_hash",
+            "receipt_hash",
+            "worker",
+            "token_usage",
+            "session_balance",
+        ]
+        return result
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 

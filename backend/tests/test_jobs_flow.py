@@ -103,6 +103,40 @@ def _patch_chain(monkeypatch: pytest.MonkeyPatch, *, prompt: str, onchain_job_id
     return captured
 
 
+def test_run_session_job_uses_session_ledger_without_onchain_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = TestClient(app)
+    _register_worker(client)
+    offer = client.get("/offers").json()[0]
+
+    def fail_submit(*args: object) -> dict:
+        raise AssertionError("session ledger flow must not submit to the escrow contract")
+
+    monkeypatch.setattr(jobs_module, "submit_escrow_result", fail_submit)
+
+    response = client.post(
+        "/jobs/run-session",
+        json={
+            "session_id": "session-demo",
+            "prompt": "Summarize escrow settlement for an agent.",
+            "offer_id": offer["offer_id"],
+            "model_id": offer["model_id"],
+            "buyer_address": BUYER_ADDRESS,
+            "escrow_amount_wei": "10000000000000000",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    job = body["job"]
+    assert job["status"] == "submitted"
+    assert job["payment_state"] == "payable"
+    assert job["chain_payment_state"] == "session_ledger"
+    assert job["onchain_job_id"] == "session-demo"
+    assert job["onchain_tx_hash_create"] == "session-ledger"
+    assert job["result"]
+    assert body["settlement_metadata"]["mode"] == "escrow_session_ledger"
+
+
 def test_run_paid_job_runs_inference_when_escrow_matches(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
     _register_worker(client)
