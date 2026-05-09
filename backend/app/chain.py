@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from typing import Any
@@ -35,10 +37,13 @@ def chain_status() -> dict[str, Any]:
     settings = get_chain_settings()
     status: dict[str, Any] = {
         "chain_enabled": settings.chain_enabled,
+        "chain_write_enabled": settings.chain_write_enabled,
         "rpc_url": settings.rpc_url,
         "chain_id": settings.chain_id,
         "contract_address": settings.contract_address,
+        "worker_address": settings.worker_address,
         "latest_block": None,
+        "cast_available": shutil.which("cast") is not None,
         "error": None,
     }
     if not settings.chain_enabled:
@@ -52,6 +57,119 @@ def chain_status() -> dict[str, Any]:
         status["chain_enabled"] = False
         status["error"] = str(exc)
     return status
+
+
+def _run_cast(args: list[str]) -> str:
+    if shutil.which("cast") is None:
+        raise RuntimeError("cast is not available on PATH")
+    result = subprocess.run(
+        ["cast", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    return result.stdout.strip()
+
+
+def _parse_transaction_hash(output: str) -> str | None:
+    for line in output.splitlines():
+        normalized = line.strip()
+        if normalized.startswith("transactionHash"):
+            parts = normalized.split()
+            return parts[-1] if parts else None
+        if normalized.startswith("0x") and len(normalized) == 66:
+            return normalized
+    return None
+
+
+def _normalize_bytes32(value: str) -> str:
+    if value.startswith("0x") and len(value) == 66:
+        return value
+    raise ValueError(f"expected bytes32 hex value, got: {value}")
+
+
+def create_escrow_job(worker: str, input_hash: str) -> dict[str, str]:
+    settings = get_chain_settings()
+    if not settings.chain_write_enabled:
+        raise RuntimeError("chain write disabled: RPC_URL, CHAIN_ID, INFERENCE_ESCROW_ADDRESS, BUYER_PRIVATE_KEY, and WORKER_PRIVATE_KEY are required")
+
+    next_job_id = _run_cast(
+        [
+            "call",
+            settings.contract_address or "",
+            "nextJobId()(uint256)",
+            "--rpc-url",
+            settings.rpc_url or "",
+        ]
+    )
+    output = _run_cast(
+        [
+            "send",
+            settings.contract_address or "",
+            "createJob(address,bytes32)",
+            worker,
+            _normalize_bytes32(input_hash),
+            "--value",
+            settings.escrow_value,
+            "--rpc-url",
+            settings.rpc_url or "",
+            "--private-key",
+            settings.buyer_private_key or "",
+        ]
+    )
+    return {
+        "onchain_job_id": next_job_id.splitlines()[-1].strip(),
+        "tx_hash": _parse_transaction_hash(output) or "unknown",
+        "chain_payment_state": "created",
+    }
+
+
+def submit_escrow_result(onchain_job_id: str, output_hash: str, receipt_hash: str) -> dict[str, str]:
+    settings = get_chain_settings()
+    if not settings.chain_write_enabled:
+        raise RuntimeError("chain write disabled")
+    output = _run_cast(
+        [
+            "send",
+            settings.contract_address or "",
+            "submitResult(uint256,bytes32,bytes32,uint256)",
+            onchain_job_id,
+            _normalize_bytes32(output_hash),
+            _normalize_bytes32(receipt_hash),
+            settings.requested_payment_wei,
+            "--rpc-url",
+            settings.rpc_url or "",
+            "--private-key",
+            settings.worker_private_key or "",
+        ]
+    )
+    return {
+        "tx_hash": _parse_transaction_hash(output) or "unknown",
+        "chain_payment_state": "result_submitted",
+    }
+
+
+def release_escrow_payment(onchain_job_id: str) -> dict[str, str]:
+    settings = get_chain_settings()
+    if not settings.chain_write_enabled:
+        raise RuntimeError("chain write disabled")
+    output = _run_cast(
+        [
+            "send",
+            settings.contract_address or "",
+            "releasePayment(uint256)",
+            onchain_job_id,
+            "--rpc-url",
+            settings.rpc_url or "",
+            "--private-key",
+            settings.buyer_private_key or "",
+        ]
+    )
+    return {
+        "tx_hash": _parse_transaction_hash(output) or "unknown",
+        "chain_payment_state": "paid",
+    }
 
 
 def settlement_metadata(job: Job) -> dict[str, str | None]:
