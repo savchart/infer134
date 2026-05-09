@@ -3,28 +3,27 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { ReceiptCard } from "../../components/ReceiptCard";
-import { VerificationPanel } from "../../components/VerificationPanel";
 import { WalletHeader } from "../../components/WalletHeader";
 import {
-  claimJob,
-  createJob,
   getChainStatus,
   getHealth,
   getOffers,
   getProviderHealth,
-  payJob,
-  runJob,
-  submitJob,
+  runPaidJob,
   type AuthSession,
   type BackendJob,
   type ChainStatus,
-  type ReceiptPayload,
   type WorkerOffer
 } from "../../lib/api";
-import { sha256Hex, type ConnectionState, type ExecutionReceipt } from "../../lib/demoData";
+import { sha256Hex, type ConnectionState } from "../../lib/demoData";
+import {
+  createEscrowJob,
+  parseInferenceFeeToWei,
+  releaseEscrowPayment
+} from "../../lib/escrow";
+import { requestWalletAddress } from "../../lib/walletAuth";
 
-type RunState = "idle" | "creating" | "running" | "receipt_ready" | "paid" | "error";
+type RunState = "idle" | "paying" | "running" | "ready" | "released" | "error";
 
 type MarketplaceStatus = {
   backend: ConnectionState;
@@ -35,24 +34,14 @@ type MarketplaceStatus = {
 
 const defaultPrompt = "Explain signed execution receipts in one sentence.";
 
-function normalizeReceipt(receipt: ReceiptPayload): ExecutionReceipt {
-  return {
-    job_id: receipt.job_id,
-    buyer: receipt.buyer,
-    buyer_name: receipt.buyer_name,
-    worker: receipt.worker,
-    worker_name: receipt.worker_name,
-    model_id: receipt.model_id,
-    runtime: receipt.runtime,
-    input_hash: receipt.input_hash,
-    output_hash: receipt.output_hash,
-    receipt_hash: receipt.receipt_hash,
-    price: receipt.price,
-    payment_state: receipt.payment_state,
-    timestamp: receipt.timestamp,
-    signature: receipt.signature
-  };
-}
+const PHASE_LABELS: Record<RunState, string> = {
+  idle: "Pick a GPU + model option and write a prompt",
+  paying: "Awaiting wallet confirmation for escrow tx…",
+  running: "Backend verifying escrow and running inference…",
+  ready: "Result ready — release payment to settle onchain",
+  released: "Paid",
+  error: "Error"
+};
 
 function StatusBadge({ label, state }: { label: string; state: ConnectionState }) {
   return (
@@ -64,9 +53,9 @@ function StatusBadge({ label, state }: { label: string; state: ConnectionState }
 
 function shortHash(value?: string | null) {
   if (!value) {
-    return "pending";
+    return undefined;
   }
-  return value.length > 18 ? `${value.slice(0, 10)}...${value.slice(-8)}` : value;
+  return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
 }
 
 export default function ClientMarketplacePage() {
@@ -79,10 +68,10 @@ export default function ClientMarketplacePage() {
   const [offers, setOffers] = useState<WorkerOffer[]>([]);
   const [selectedOfferId, setSelectedOfferId] = useState("");
   const [prompt, setPrompt] = useState(defaultPrompt);
-  const [inputHash, setInputHash] = useState("");
   const [job, setJob] = useState<BackendJob | undefined>();
-  const [receipt, setReceipt] = useState<ExecutionReceipt | undefined>();
-  const [receiptVerified, setReceiptVerified] = useState(false);
+  const [txHash, setTxHash] = useState<string | undefined>();
+  const [onchainJobId, setOnchainJobId] = useState<string | undefined>();
+  const [releaseTxHash, setReleaseTxHash] = useState<string | undefined>();
   const [runState, setRunState] = useState<RunState>("idle");
   const [notice, setNotice] = useState("");
 
@@ -91,6 +80,10 @@ export default function ClientMarketplacePage() {
     [offers, selectedOfferId]
   );
 
+  const contractAddress = status.chainStatus?.contract_address ?? undefined;
+  const chainEnabled = status.chain === "connected" && Boolean(contractAddress);
+  const paymentState = job?.payment_state ?? (runState === "released" ? "paid" : "unpaid");
+
   useEffect(() => {
     let mounted = true;
 
@@ -98,32 +91,21 @@ export default function ClientMarketplacePage() {
       setNotice("");
 
       getHealth()
-        .then(() => {
-          if (mounted) {
-            setStatus((current) => ({ ...current, backend: "connected" }));
-          }
-        })
-        .catch(() => {
-          if (mounted) {
-            setStatus((current) => ({ ...current, backend: "unavailable" }));
-          }
-        });
+        .then(() => mounted && setStatus((current) => ({ ...current, backend: "connected" })))
+        .catch(() => mounted && setStatus((current) => ({ ...current, backend: "unavailable" })));
 
       getChainStatus()
         .then((chainStatus) => {
-          if (mounted) {
-            setStatus((current) => ({
-              ...current,
-              chain: chainStatus.chain_enabled && !chainStatus.error ? "connected" : "unavailable",
-              chainStatus
-            }));
+          if (!mounted) {
+            return;
           }
+          setStatus((current) => ({
+            ...current,
+            chain: chainStatus.chain_enabled && !chainStatus.error ? "connected" : "unavailable",
+            chainStatus
+          }));
         })
-        .catch(() => {
-          if (mounted) {
-            setStatus((current) => ({ ...current, chain: "unavailable" }));
-          }
-        });
+        .catch(() => mounted && setStatus((current) => ({ ...current, chain: "unavailable" })));
 
       try {
         await getProviderHealth();
@@ -167,75 +149,108 @@ export default function ClientMarketplacePage() {
     };
   }, []);
 
-  async function refreshInputHash() {
-    const nextHash = await sha256Hex(prompt);
-    setInputHash(nextHash);
-    return nextHash;
-  }
-
-  async function runInference() {
+  async function payAndRun() {
     if (!selectedOffer) {
-      setNotice("Choose an available GPU + model option before running inference.");
+      setNotice("Choose a GPU + model option before paying.");
+      return;
+    }
+    if (!chainEnabled || !contractAddress) {
+      setNotice("Local Anvil is not connected. Start anvil and deploy InferenceEscrow to enable Pay & run.");
+      return;
+    }
+    if (!prompt.trim()) {
+      setNotice("Enter a prompt before paying.");
       return;
     }
 
-    setRunState("creating");
+    setRunState("paying");
     setNotice("");
-    setReceipt(undefined);
-    setReceiptVerified(false);
+    setJob(undefined);
+    setTxHash(undefined);
+    setOnchainJobId(undefined);
+    setReleaseTxHash(undefined);
 
     try {
-      const nextInputHash = await refreshInputHash();
-      const created = await createJob(prompt, selectedOffer.model_id, session?.session_token, selectedOffer.inference_fee);
-      const claimed = await claimJob(created.job.job_id, selectedOffer.worker_id);
-      setJob({
-        ...claimed,
-        input_hash: claimed.input_hash || nextInputHash,
-        price: selectedOffer.inference_fee
+      const buyerAddress = session?.address ?? (await requestWalletAddress());
+      const inputHashHex = await sha256Hex(prompt);
+      const valueWei = parseInferenceFeeToWei(selectedOffer.inference_fee);
+
+      setNotice(`Sending escrow tx for ${selectedOffer.inference_fee}. Confirm in your wallet.`);
+      const escrow = await createEscrowJob({
+        contractAddress,
+        workerAddress: selectedOffer.worker_address,
+        inputHashHex,
+        valueWei,
+        fromAddress: buyerAddress
       });
+      setTxHash(escrow.txHash);
+      setOnchainJobId(escrow.onchainJobId);
 
       setRunState("running");
-      const runResult = await runJob(created.job.job_id, selectedOffer.worker_id);
-      const submitted = await submitJob(created.job.job_id);
-      const nextReceipt = normalizeReceipt(submitted.receipt);
-      setJob({
-        ...submitted.job,
-        result: submitted.job.result ?? runResult.job.result,
-        price: submitted.job.price || selectedOffer.inference_fee
+      setNotice(`Escrow tx mined (${escrow.txHash.slice(0, 10)}…). Backend is verifying onchain state and running inference.`);
+
+      const result = await runPaidJob({
+        onchain_job_id: escrow.onchainJobId,
+        tx_hash: escrow.txHash,
+        prompt,
+        offer_id: selectedOffer.offer_id,
+        model_id: selectedOffer.model_id,
+        buyer_address: buyerAddress,
+        auth_token: session?.session_token
       });
-      setReceipt(nextReceipt);
-      setReceiptVerified(Boolean(submitted.receipt_verified));
-      setRunState("receipt_ready");
-      setNotice("Worker returned an offchain result and signed execution receipt. Payment is ready to release.");
+
+      setJob(result.job);
+      setRunState("ready");
+      setNotice(
+        result.receipt_verified
+          ? "Inference complete. Receipt verified locally; click Release payment to settle onchain."
+          : "Inference complete, but receipt verification failed. Inspect the panels below before releasing."
+      );
     } catch (error) {
       setRunState("error");
-      setNotice(error instanceof Error ? error.message : "Inference request failed.");
+      setNotice(error instanceof Error ? error.message : "Pay & run failed.");
     }
   }
 
   async function releasePayment() {
-    if (!job) {
+    if (!onchainJobId || !contractAddress) {
       return;
     }
-
     setRunState("running");
     setNotice("");
     try {
-      const paid = await payJob(job.job_id);
-      setJob(paid.job);
-      if (receipt) {
-        setReceipt({
-          ...receipt,
-          payment_state: "paid"
-        });
+      const buyerAddress = session?.address ?? (await requestWalletAddress());
+      const release = await releaseEscrowPayment({
+        contractAddress,
+        onchainJobId,
+        fromAddress: buyerAddress
+      });
+      setReleaseTxHash(release.txHash);
+      setRunState("released");
+      if (job) {
+        setJob({ ...job, payment_state: "paid", chain_payment_state: "paid", onchain_tx_hash_release: release.txHash });
       }
-      setRunState("paid");
-      setNotice("Payment released. Prompt and output stayed offchain; hashes and payment state are settlement metadata.");
+      setNotice(`Payment released to worker. Release tx: ${release.txHash.slice(0, 10)}…`);
     } catch (error) {
       setRunState("error");
-      setNotice(error instanceof Error ? error.message : "Payment release failed.");
+      setNotice(error instanceof Error ? error.message : "Release payment failed.");
     }
   }
+
+  const busy = runState === "paying" || runState === "running";
+  const canPay =
+    Boolean(selectedOffer) &&
+    chainEnabled &&
+    Boolean(prompt.trim()) &&
+    !busy &&
+    runState !== "ready" &&
+    runState !== "released";
+
+  const inputHashShort = shortHash(job?.input_hash);
+  const outputHashShort = shortHash(job?.output_hash);
+  const receiptHashShort = shortHash(job?.receipt_hash);
+  const escrowTxShort = shortHash(txHash);
+  const releaseTxShort = shortHash(releaseTxHash);
 
   return (
     <main className="client-shell">
@@ -244,10 +259,10 @@ export default function ClientMarketplacePage() {
       <header className="client-header">
         <div>
           <span className="eyebrow">Buyer marketplace</span>
-          <h1>Choose compute, write a prompt, receive a signed execution receipt.</h1>
+          <h1>Pay-per-inference: pay first, prompt runs only after escrow is verified.</h1>
           <p>
-            Available options come from live provider-node capacity published by workers.
-            No provider-node means no GPU options are shown.
+            Your wallet signs <code>createJob{"{value}"}</code> on the local InferenceEscrow contract.
+            The backend reads the onchain state and runs inference only when the escrow matches your prompt.
           </p>
         </div>
         <div className="header-actions">
@@ -302,7 +317,7 @@ export default function ClientMarketplacePage() {
                     <dl>
                       <dt>Price</dt>
                       <dd>{offer.price_per_1m_input_tokens} / 1M tokens</dd>
-                      <dt>Request fee</dt>
+                      <dt>Escrow per request</dt>
                       <dd>{offer.inference_fee}</dd>
                     </dl>
                   </button>
@@ -319,24 +334,33 @@ export default function ClientMarketplacePage() {
           <div className="panel client-prompt-panel">
             <div>
               <span className="eyebrow">Inference request</span>
-              <h2>Write prompt</h2>
-              <p className="muted">Prompt stays offchain. Only input_hash is used as settlement metadata.</p>
+              <h2>Write prompt and pay</h2>
+              <p className="muted">
+                Prompt stays offchain. Your wallet sends the escrow tx; the backend gates inference on onchain state.
+              </p>
             </div>
-            <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} />
+            <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy} />
             <div className="entry-action-bar">
-              <button className="secondary-link action-button" type="button" onClick={refreshInputHash}>
-                Compute input_hash
-              </button>
               <button
                 className="primary-link action-button"
                 type="button"
-                onClick={runInference}
-                disabled={!selectedOffer || !prompt.trim() || runState === "creating" || runState === "running"}
+                onClick={payAndRun}
+                disabled={!canPay}
               >
-                {runState === "creating" || runState === "running" ? "Running..." : "Run inference"}
+                {runState === "paying"
+                  ? "Sending escrow tx..."
+                  : runState === "running"
+                  ? "Running inference..."
+                  : runState === "ready"
+                  ? "Inference complete"
+                  : "Pay & run"}
               </button>
             </div>
-            {inputHash ? <code className="hash-block">{inputHash}</code> : null}
+            {!chainEnabled ? (
+              <p className="muted">
+                Local Anvil + InferenceEscrow address are required. Check <code>chain/status</code> on the backend.
+              </p>
+            ) : null}
           </div>
 
           {job?.result ? (
@@ -346,76 +370,62 @@ export default function ClientMarketplacePage() {
               <code>{job.output_hash}</code>
             </div>
           ) : null}
-
-          <ReceiptCard receipt={receipt} />
-          <VerificationPanel
-            receiptReady={Boolean(receipt)}
-            paymentState={job?.payment_state ?? "unpaid"}
-            signatureEnabled={Boolean(receipt?.signature)}
-          />
         </section>
 
         <aside className="client-side-card">
-          <div className="wallet-summary-panel">
-            <div className="kicker">Client wallet</div>
-            {session ? (
-              <>
-                <span className="status-pill good">wallet signed</span>
-                <p className="muted">
-                  Buyer requests will use {session.ens_style_name ?? "research-agent.eth"} at {session.address}.
-                </p>
-              </>
-            ) : (
-              <>
-                <span className="status-pill warn">not connected</span>
-                <p className="muted">Connect the client wallet from the top-right control for wallet-linked jobs.</p>
-              </>
-            )}
-          </div>
-
           <div className="live-state-card">
-            <span className="eyebrow">Current selection</span>
+            <span className="eyebrow">Current state</span>
+            <p className={`payment-state ${paymentState}`}>{PHASE_LABELS[runState]}</p>
             <dl className="state-list">
-              <dt>Worker</dt>
-              <dd>{selectedOffer?.worker_name ?? "not selected"}</dd>
-              <dt>GPU</dt>
-              <dd>{selectedOffer ? `${selectedOffer.gpu_name} (${selectedOffer.gpu_memory_gb} GB)` : "not selected"}</dd>
-              <dt>Model</dt>
-              <dd>{selectedOffer?.model_id ?? "not selected"}</dd>
-              <dt>Price</dt>
-              <dd>{selectedOffer?.inference_fee ?? "not selected"}</dd>
               <dt>Payment state</dt>
               <dd>
-                <span className={`payment-state ${job?.payment_state ?? "unpaid"}`}>
-                  {job?.payment_state ?? "unpaid"}
-                </span>
+                <span className={`payment-state ${paymentState}`}>{paymentState}</span>
               </dd>
-              <dt>Input hash</dt>
-              <dd>
-                <code>{shortHash(job?.input_hash ?? inputHash)}</code>
-              </dd>
-              <dt>Output hash</dt>
-              <dd>
-                <code>{shortHash(job?.output_hash)}</code>
-              </dd>
-              <dt>Receipt hash</dt>
-              <dd>
-                <code>{shortHash(job?.receipt_hash ?? receipt?.receipt_hash)}</code>
-              </dd>
+              {onchainJobId ? (
+                <>
+                  <dt>Onchain job id</dt>
+                  <dd><code>{onchainJobId}</code></dd>
+                </>
+              ) : null}
+              {escrowTxShort ? (
+                <>
+                  <dt>Escrow tx</dt>
+                  <dd><code>{escrowTxShort}</code></dd>
+                </>
+              ) : null}
+              {inputHashShort ? (
+                <>
+                  <dt>Input hash</dt>
+                  <dd><code>{inputHashShort}</code></dd>
+                </>
+              ) : null}
+              {outputHashShort ? (
+                <>
+                  <dt>Output hash</dt>
+                  <dd><code>{outputHashShort}</code></dd>
+                </>
+              ) : null}
+              {receiptHashShort ? (
+                <>
+                  <dt>Receipt hash</dt>
+                  <dd><code>{receiptHashShort}</code></dd>
+                </>
+              ) : null}
+              {releaseTxShort ? (
+                <>
+                  <dt>Release tx</dt>
+                  <dd><code>{releaseTxShort}</code></dd>
+                </>
+              ) : null}
             </dl>
             <button
               className="primary-button"
               type="button"
               onClick={releasePayment}
-              disabled={!job || !receipt || job.payment_state === "paid" || runState === "running"}
+              disabled={runState !== "ready" || !onchainJobId}
             >
-              {job?.payment_state === "paid" ? "Payment paid" : "Release payment"}
+              {runState === "released" ? "Payment released" : "Release payment"}
             </button>
-          </div>
-
-          <div className="notice">
-            <strong>What stays offchain</strong>
-            <p>Prompt and output stay in the app/backend flow. The UI shows hashes, receipt, worker identity, and payment state.</p>
           </div>
         </aside>
       </div>
