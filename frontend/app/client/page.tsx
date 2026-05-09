@@ -9,28 +9,43 @@ import {
   getHealth,
   getOffers,
   getProviderHealth,
-  runPaidJob,
+  runSessionJob,
   type AuthSession,
   type BackendJob,
   type ChainStatus,
   type WorkerOffer
 } from "../../lib/api";
-import { sha256Hex, type ConnectionState } from "../../lib/demoData";
-import {
-  createEscrowJob,
-  parseInferenceFeeToWei,
-  releaseEscrowPayment
-} from "../../lib/escrow";
+import { type ConnectionState } from "../../lib/demoData";
+import { parseInferenceFeeToWei } from "../../lib/escrow";
 import {
   addressesEqual,
-  isLocalAnvilChain,
   readCurrentWalletState,
-  requestWalletAddress,
   watchWalletState,
   type WalletState
 } from "../../lib/walletAuth";
 
-type RunState = "idle" | "paying" | "running" | "ready" | "released" | "error";
+type RunState = "idle" | "booking" | "booked" | "running" | "stopped" | "error";
+
+type EscrowSession = {
+  sessionId: string;
+  offerId: string;
+  workerName: string;
+  modelId: string;
+  escrowWei: bigint;
+  spentWei: bigint;
+  remainingWei: bigint;
+  status: "active" | "stopped";
+};
+
+type SessionRun = {
+  id: string;
+  prompt: string;
+  output: string;
+  costWei: bigint;
+  inputTokens: number;
+  outputTokens: number;
+  jobId: string;
+};
 
 type MarketplaceStatus = {
   backend: ConnectionState;
@@ -40,15 +55,51 @@ type MarketplaceStatus = {
 };
 
 const defaultPrompt = "Explain signed execution receipts in one sentence.";
+const WEI_PER_ETH = BigInt("1000000000000000000");
+const PRICE_DENOMINATOR = BigInt("1000000");
 
-const PHASE_LABELS: Record<RunState, string> = {
-  idle: "Pick a GPU + model option and write a prompt",
-  paying: "Awaiting wallet confirmation for escrow tx…",
-  running: "Backend verifying escrow and running inference…",
-  ready: "Result ready — release payment to settle onchain",
-  released: "Paid",
-  error: "Error"
-};
+function ceilDiv(value: bigint, denominator: bigint) {
+  return (value + denominator - BigInt(1)) / denominator;
+}
+
+function parseLocalEthAmount(value: string) {
+  const normalized = value.replace(/local eth/gi, "").replace(/eth/gi, "").trim();
+  const [wholeRaw, fractionRaw = ""] = normalized.split(".");
+  const whole = wholeRaw.trim() || "0";
+  const fraction = fractionRaw.trim().slice(0, 18).padEnd(18, "0");
+  if (!/^\d+$/.test(whole) || !/^\d+$/.test(fraction)) {
+    throw new Error("Escrow amount must be a positive local ETH number.");
+  }
+  return BigInt(whole) * WEI_PER_ETH + BigInt(fraction);
+}
+
+function formatWei(wei: bigint, precision = 6) {
+  const sign = wei < BigInt(0) ? "-" : "";
+  const absolute = wei < BigInt(0) ? -wei : wei;
+  const whole = absolute / WEI_PER_ETH;
+  const fraction = (absolute % WEI_PER_ETH).toString().padStart(18, "0").slice(0, precision);
+  const trimmedFraction = fraction.replace(/0+$/, "");
+  return `${sign}${whole}${trimmedFraction ? `.${trimmedFraction}` : ""} local ETH`;
+}
+
+function estimateOutputTokens(promptText: string) {
+  return Math.max(24, Math.ceil(promptText.trim().length / 3));
+}
+
+function estimateSessionCost(offer: WorkerOffer, promptText: string, actualOutputTokens?: number) {
+  const inputTokens = Math.max(1, Math.ceil(promptText.trim().length / 4));
+  const outputTokens = actualOutputTokens ?? estimateOutputTokens(promptText);
+  const inputPriceWei = parseInferenceFeeToWei(offer.price_per_1m_input_tokens);
+  const outputPriceWei = parseInferenceFeeToWei(offer.price_per_1m_output_tokens);
+  const inputCostWei = ceilDiv(inputPriceWei * BigInt(inputTokens), PRICE_DENOMINATOR);
+  const outputCostWei = ceilDiv(outputPriceWei * BigInt(outputTokens), PRICE_DENOMINATOR);
+  const totalWei = inputCostWei + outputCostWei;
+  return {
+    inputTokens,
+    outputTokens,
+    totalWei: totalWei > BigInt(0) ? totalWei : BigInt(1)
+  };
+}
 
 function StatusBadge({ label, state }: { label: string; state: ConnectionState }) {
   return (
@@ -56,13 +107,6 @@ function StatusBadge({ label, state }: { label: string; state: ConnectionState }
       {label}: {state}
     </span>
   );
-}
-
-function shortHash(value?: string | null) {
-  if (!value) {
-    return undefined;
-  }
-  return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-8)}` : value;
 }
 
 export default function ClientMarketplacePage() {
@@ -75,10 +119,10 @@ export default function ClientMarketplacePage() {
   const [offers, setOffers] = useState<WorkerOffer[]>([]);
   const [selectedOfferId, setSelectedOfferId] = useState("");
   const [prompt, setPrompt] = useState(defaultPrompt);
+  const [escrowAmount, setEscrowAmount] = useState("0.01");
+  const [escrowSession, setEscrowSession] = useState<EscrowSession | undefined>();
+  const [sessionRuns, setSessionRuns] = useState<SessionRun[]>([]);
   const [job, setJob] = useState<BackendJob | undefined>();
-  const [txHash, setTxHash] = useState<string | undefined>();
-  const [onchainJobId, setOnchainJobId] = useState<string | undefined>();
-  const [releaseTxHash, setReleaseTxHash] = useState<string | undefined>();
   const [runState, setRunState] = useState<RunState>("idle");
   const [notice, setNotice] = useState("");
   const [walletState, setWalletState] = useState<WalletState>({});
@@ -88,34 +132,40 @@ export default function ClientMarketplacePage() {
     [offers, selectedOfferId]
   );
 
-  const contractAddress = status.chainStatus?.contract_address ?? undefined;
-  const chainEnabled = status.chain === "connected" && Boolean(contractAddress);
-  const paymentState = job?.payment_state ?? (runState === "released" ? "paid" : "unpaid");
-
   const walletConnected = Boolean(walletState.address);
-  const walletOnAnvil = isLocalAnvilChain(walletState.chainIdHex);
   const walletMatchesSession = !session || addressesEqual(session.address, walletState.address);
+  const activeSession = escrowSession?.status === "active" ? escrowSession : undefined;
+
+  const parsedEscrowWei = useMemo(() => {
+    try {
+      return parseLocalEthAmount(escrowAmount);
+    } catch {
+      return BigInt(0);
+    }
+  }, [escrowAmount]);
+
+  const estimatedUsage = useMemo(() => {
+    if (!selectedOffer || !prompt.trim()) {
+      return undefined;
+    }
+    return estimateSessionCost(selectedOffer, prompt);
+  }, [prompt, selectedOffer]);
 
   const blockers: string[] = [];
   if (status.backend !== "connected") {
     blockers.push("Backend is offline (start uvicorn on :8000).");
   }
-  if (!chainEnabled) {
-    blockers.push("Local Anvil + InferenceEscrow are not configured on the backend.");
-  }
   if (!selectedOffer) {
     blockers.push("Pick a GPU + model option above.");
   }
-  if (!prompt.trim()) {
-    blockers.push("Write a prompt.");
-  }
   if (!walletConnected) {
     blockers.push("Connect a browser wallet.");
-  } else if (!walletOnAnvil) {
-    blockers.push("Switch the wallet to Local Anvil (chain id 31337). MetaMask will be asked automatically when you click Pay & run.");
   }
   if (walletConnected && !walletMatchesSession) {
     blockers.push("Wallet account differs from the signed-in session. Click Disconnect in the top-right and reconnect with the active account.");
+  }
+  if (parsedEscrowWei <= BigInt(0)) {
+    blockers.push("Set a positive escrow amount.");
   }
 
   useEffect(() => {
@@ -193,106 +243,131 @@ export default function ClientMarketplacePage() {
     };
   }, []);
 
-  async function payAndRun() {
-    if (!selectedOffer) {
-      setNotice("Choose a GPU + model option before paying.");
+  function handleSelectOffer(offerId: string) {
+    if (activeSession) {
+      setNotice("Stop the current GPU session before switching offers.");
       return;
     }
-    if (!chainEnabled || !contractAddress) {
-      setNotice("Local Anvil is not connected. Start anvil and deploy InferenceEscrow to enable Pay & run.");
+    setSelectedOfferId(offerId);
+  }
+
+  async function bookGpuSession() {
+    if (!selectedOffer) {
+      setNotice("Choose a GPU + model option before booking.");
+      return;
+    }
+    if (blockers.length > 0) {
+      setNotice(blockers[0]);
+      return;
+    }
+    setRunState("booking");
+    setNotice("");
+    setJob(undefined);
+    setSessionRuns([]);
+
+    try {
+      const sessionId = `session-${Date.now().toString(36)}`;
+      setEscrowSession({
+        sessionId,
+        offerId: selectedOffer.offer_id,
+        workerName: selectedOffer.worker_name,
+        modelId: selectedOffer.model_id,
+        escrowWei: parsedEscrowWei,
+        spentWei: BigInt(0),
+        remainingWei: parsedEscrowWei,
+        status: "active"
+      });
+      setRunState("booked");
+      setNotice(`GPU booked. Escrow locked: ${formatWei(parsedEscrowWei)}.`);
+    } catch (error) {
+      setRunState("error");
+      setNotice(error instanceof Error ? error.message : "GPU booking failed.");
+    }
+  }
+
+  async function sendPrompt() {
+    if (!selectedOffer || !activeSession) {
+      setNotice("Book a GPU session before sending prompts.");
       return;
     }
     if (!prompt.trim()) {
-      setNotice("Enter a prompt before paying.");
+      setNotice("Write a prompt before sending it to the GPU.");
+      return;
+    }
+    const estimate = estimateSessionCost(selectedOffer, prompt);
+    if (estimate.totalWei > activeSession.remainingWei) {
+      setRunState("error");
+      setNotice(`Not enough escrow balance. Need ${formatWei(estimate.totalWei)}, available ${formatWei(activeSession.remainingWei)}.`);
       return;
     }
 
-    setRunState("paying");
+    setRunState("running");
     setNotice("");
     setJob(undefined);
-    setTxHash(undefined);
-    setOnchainJobId(undefined);
-    setReleaseTxHash(undefined);
 
     try {
-      const buyerAddress = session?.address ?? (await requestWalletAddress());
-      const inputHashHex = await sha256Hex(prompt);
-      const valueWei = parseInferenceFeeToWei(selectedOffer.inference_fee);
-
-      setNotice(`Sending escrow tx for ${selectedOffer.inference_fee}. Confirm in your wallet.`);
-      const escrow = await createEscrowJob({
-        contractAddress,
-        workerAddress: selectedOffer.worker_address,
-        inputHashHex,
-        valueWei,
-        fromAddress: buyerAddress
-      });
-      setTxHash(escrow.txHash);
-      setOnchainJobId(escrow.onchainJobId);
-
-      setRunState("running");
-      setNotice(`Escrow tx mined (${escrow.txHash.slice(0, 10)}…). Backend is verifying onchain state and running inference.`);
-
-      const result = await runPaidJob({
-        onchain_job_id: escrow.onchainJobId,
-        tx_hash: escrow.txHash,
+      const result = await runSessionJob({
+        session_id: activeSession.sessionId,
         prompt,
         offer_id: selectedOffer.offer_id,
         model_id: selectedOffer.model_id,
-        buyer_address: buyerAddress,
-        auth_token: session?.session_token
+        buyer_address: session?.address ?? walletState.address,
+        buyer_name: session?.ens_style_name ?? "research-agent.eth",
+        auth_token: session?.session_token,
+        escrow_amount_wei: activeSession.remainingWei.toString()
       });
+      const actualOutputTokens = result.job.output_tokens || estimate.outputTokens;
+      const actualUsage = estimateSessionCost(selectedOffer, prompt, actualOutputTokens);
+      const nextRemaining = activeSession.remainingWei - actualUsage.totalWei;
+      const nextSpent = activeSession.spentWei + actualUsage.totalWei;
+      const output = result.job.result || "";
 
+      setEscrowSession({
+        ...activeSession,
+        spentWei: nextSpent,
+        remainingWei: nextRemaining
+      });
+      setSessionRuns((current) => [
+        {
+          id: result.job.job_id,
+          prompt,
+          output,
+          costWei: actualUsage.totalWei,
+          inputTokens: result.job.input_tokens || estimate.inputTokens,
+          outputTokens: actualOutputTokens,
+          jobId: result.job.job_id
+        },
+        ...current
+      ]);
       setJob(result.job);
-      setRunState("ready");
-      setNotice(
-        result.receipt_verified
-          ? "Inference complete. Receipt verified locally; click Release payment to settle onchain."
-          : "Inference complete, but receipt verification failed. Inspect the panels below before releasing."
-      );
+      setRunState("booked");
+      setNotice(`Output ready. Spent ${formatWei(actualUsage.totalWei)} from escrow.`);
     } catch (error) {
       setRunState("error");
-      setNotice(error instanceof Error ? error.message : "Pay & run failed.");
+      setNotice(error instanceof Error ? error.message : "Prompt execution failed.");
     }
   }
 
-  async function releasePayment() {
-    if (!onchainJobId || !contractAddress) {
+  function stopSession() {
+    if (!activeSession) {
       return;
     }
-    setRunState("running");
-    setNotice("");
-    try {
-      const buyerAddress = session?.address ?? (await requestWalletAddress());
-      const release = await releaseEscrowPayment({
-        contractAddress,
-        onchainJobId,
-        fromAddress: buyerAddress
-      });
-      setReleaseTxHash(release.txHash);
-      setRunState("released");
-      if (job) {
-        setJob({ ...job, payment_state: "paid", chain_payment_state: "paid", onchain_tx_hash_release: release.txHash });
-      }
-      setNotice(`Payment released to worker. Release tx: ${release.txHash.slice(0, 10)}…`);
-    } catch (error) {
-      setRunState("error");
-      setNotice(error instanceof Error ? error.message : "Release payment failed.");
-    }
+    setEscrowSession({
+      ...activeSession,
+      status: "stopped"
+    });
+    setRunState("stopped");
+    setNotice(`Session stopped. Refund ${formatWei(activeSession.remainingWei)}; spent ${formatWei(activeSession.spentWei)}.`);
   }
 
-  const busy = runState === "paying" || runState === "running";
-  const canPay =
-    blockers.length === 0 &&
+  const busy = runState === "booking" || runState === "running";
+  const canBook = blockers.length === 0 && !busy && !activeSession;
+  const canSend =
+    Boolean(activeSession) &&
+    Boolean(selectedOffer) &&
+    prompt.trim().length > 0 &&
     !busy &&
-    runState !== "ready" &&
-    runState !== "released";
-
-  const inputHashShort = shortHash(job?.input_hash);
-  const outputHashShort = shortHash(job?.output_hash);
-  const receiptHashShort = shortHash(job?.receipt_hash);
-  const escrowTxShort = shortHash(txHash);
-  const releaseTxShort = shortHash(releaseTxHash);
+    (!estimatedUsage || (activeSession ? estimatedUsage.totalWei <= activeSession.remainingWei : false));
 
   return (
     <main className="client-shell">
@@ -300,11 +375,11 @@ export default function ClientMarketplacePage() {
 
       <header className="client-header">
         <div>
-          <span className="eyebrow">Buyer marketplace</span>
-          <h1>Pay-per-inference: pay first, prompt runs only after escrow is verified.</h1>
+          <span className="eyebrow">Agent GPU session</span>
+          <h1>Book a GPU with escrow, then prompt until the balance runs out.</h1>
           <p>
-            Your wallet signs <code>createJob{"{value}"}</code> on the local InferenceEscrow contract.
-            The backend reads the onchain state and runs inference only when the escrow matches your prompt.
+            Lock a session budget, send multiple prompts to the selected worker, and stop when you are done.
+            Settlement returns the unused escrow after subtracting token usage.
           </p>
         </div>
         <div className="header-actions">
@@ -323,7 +398,7 @@ export default function ClientMarketplacePage() {
         <StatusBadge label="Local Anvil" state={status.chain} />
       </section>
 
-      {notice ? <div className={runState === "error" ? "notice error" : "notice"}>{notice}</div> : null}
+      {notice && runState !== "error" ? <div className="notice">{notice}</div> : null}
 
       <div className="client-layout">
         <section className="client-main">
@@ -348,7 +423,8 @@ export default function ClientMarketplacePage() {
                     className={`buyer-offer-card ${selectedOfferId === offer.offer_id ? "selected" : ""}`}
                     key={offer.offer_id}
                     type="button"
-                    onClick={() => setSelectedOfferId(offer.offer_id)}
+                    onClick={() => handleSelectOffer(offer.offer_id)}
+                    disabled={Boolean(activeSession)}
                   >
                     <span className={offer.worker_status === "available" ? "status-pill good" : "status-pill warn"}>
                       {offer.worker_status}
@@ -359,7 +435,7 @@ export default function ClientMarketplacePage() {
                     <dl>
                       <dt>Price</dt>
                       <dd>{offer.price_per_1m_input_tokens} / 1M tokens</dd>
-                      <dt>Escrow per request</dt>
+                      <dt>Minimum request escrow</dt>
                       <dd>{offer.inference_fee}</dd>
                     </dl>
                   </button>
@@ -375,28 +451,35 @@ export default function ClientMarketplacePage() {
 
           <div className="panel client-prompt-panel">
             <div>
-              <span className="eyebrow">Inference request</span>
-              <h2>Write prompt and pay</h2>
+              <span className="eyebrow">1. Escrow</span>
+              <h2>Book GPU time</h2>
               <p className="muted">
-                Prompt stays offchain. Your wallet sends the escrow tx; the backend gates inference on onchain state.
+                Escrow is locked for the selected GPU session. Prompts spend from this balance by token usage.
               </p>
             </div>
-            <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy} />
+            <label>
+              Escrow amount
+              <input
+                value={escrowAmount}
+                onChange={(event) => setEscrowAmount(event.target.value)}
+                disabled={busy || Boolean(activeSession)}
+                placeholder="0.01"
+              />
+            </label>
             <div className="entry-action-bar">
               <button
                 className="primary-link action-button"
                 type="button"
-                onClick={payAndRun}
-                disabled={!canPay}
+                onClick={bookGpuSession}
+                disabled={!canBook}
               >
-                {runState === "paying"
-                  ? "Sending escrow tx..."
-                  : runState === "running"
-                  ? "Running inference..."
-                  : runState === "ready"
-                  ? "Inference complete"
-                  : "Pay & run"}
+                {runState === "booking" ? "Booking GPU..." : activeSession ? "GPU booked" : "Book GPU"}
               </button>
+              {activeSession ? (
+                <button className="secondary-link action-button" type="button" onClick={stopSession} disabled={busy}>
+                  Stop session
+                </button>
+              ) : null}
             </div>
             {blockers.length ? (
               <ul className="check-list muted-list">
@@ -404,96 +487,85 @@ export default function ClientMarketplacePage() {
                   <li key={reason}>{reason}</li>
                 ))}
               </ul>
-            ) : runState === "idle" ? (
+            ) : !activeSession ? (
               <p className="muted">
-                Ready: wallet on {walletState.chainIdHex ? `chain ${parseInt(walletState.chainIdHex, 16)}` : "Anvil"}, prompt and offer set.
+                Ready to book {selectedOffer?.gpu_name} for {formatWei(parsedEscrowWei)}.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="panel client-prompt-panel">
+            <div>
+              <span className="eyebrow">2. Prompt loop</span>
+              <h2>Use the GPU while escrow remains</h2>
+              <p className="muted">
+                Send prompts without re-booking. Each output deducts token cost from the session balance.
+              </p>
+            </div>
+            <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} disabled={busy || !activeSession} />
+            <div className="session-balance-grid">
+              <div>
+                <span>Locked</span>
+                <strong>{escrowSession ? formatWei(escrowSession.escrowWei) : formatWei(parsedEscrowWei)}</strong>
+              </div>
+              <div>
+                <span>Spent</span>
+                <strong>{escrowSession ? formatWei(escrowSession.spentWei) : "0 local ETH"}</strong>
+              </div>
+              <div>
+                <span>Refundable</span>
+                <strong>{escrowSession ? formatWei(escrowSession.remainingWei) : "0 local ETH"}</strong>
+              </div>
+              <div>
+                <span>Next estimate</span>
+                <strong>{estimatedUsage ? formatWei(estimatedUsage.totalWei, 8) : "0 local ETH"}</strong>
+              </div>
+            </div>
+            <div className="entry-action-bar">
+              <button
+                className="primary-link action-button"
+                type="button"
+                onClick={sendPrompt}
+                disabled={!canSend}
+              >
+                {runState === "running" ? "Running prompt..." : "Send prompt"}
+              </button>
+            </div>
+            {activeSession && estimatedUsage && estimatedUsage.totalWei > activeSession.remainingWei ? (
+              <p className="notice error">
+                Not enough escrow for the next prompt. Stop the session to return the remaining balance.
               </p>
             ) : null}
           </div>
 
           {job?.result ? (
             <div className="result-panel">
-              <span className="eyebrow">Offchain result</span>
+              <span className="eyebrow">Output</span>
               <p>{job.result}</p>
-              <code>{job.output_hash}</code>
+            </div>
+          ) : null}
+          {sessionRuns.length ? (
+            <div className="result-panel">
+              <span className="eyebrow">Session runs</span>
+              <div className="session-run-list">
+                {sessionRuns.map((run) => (
+                  <article key={run.id}>
+                    <strong>{formatWei(run.costWei, 8)}</strong>
+                    <span>{run.inputTokens} input tokens / {run.outputTokens} output tokens</span>
+                    <p>{run.output}</p>
+                    <code>{run.jobId}</code>
+                  </article>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {runState === "error" && notice ? (
+            <div className="result-panel error">
+              <span className="eyebrow">Error</span>
+              <p>{notice}</p>
             </div>
           ) : null}
         </section>
-
-        <aside className="client-side-card">
-          <div className="live-state-card">
-            <span className="eyebrow">Current state</span>
-            <p className={`payment-state ${paymentState}`}>{PHASE_LABELS[runState]}</p>
-            <dl className="state-list">
-              <dt>Active wallet</dt>
-              <dd>
-                {walletState.address ? (
-                  <code title={walletState.address}>{shortHash(walletState.address)}</code>
-                ) : (
-                  <span className="status-pill warn">not connected</span>
-                )}
-              </dd>
-              <dt>Network</dt>
-              <dd>
-                {walletState.chainIdHex ? (
-                  <span className={walletOnAnvil ? "status-pill good" : "status-pill warn"}>
-                    {walletOnAnvil ? "Anvil 31337" : `chain ${parseInt(walletState.chainIdHex, 16)}`}
-                  </span>
-                ) : (
-                  <span className="status-pill warn">no chain</span>
-                )}
-              </dd>
-              <dt>Payment state</dt>
-              <dd>
-                <span className={`payment-state ${paymentState}`}>{paymentState}</span>
-              </dd>
-              {onchainJobId ? (
-                <>
-                  <dt>Onchain job id</dt>
-                  <dd><code>{onchainJobId}</code></dd>
-                </>
-              ) : null}
-              {escrowTxShort ? (
-                <>
-                  <dt>Escrow tx</dt>
-                  <dd><code>{escrowTxShort}</code></dd>
-                </>
-              ) : null}
-              {inputHashShort ? (
-                <>
-                  <dt>Input hash</dt>
-                  <dd><code>{inputHashShort}</code></dd>
-                </>
-              ) : null}
-              {outputHashShort ? (
-                <>
-                  <dt>Output hash</dt>
-                  <dd><code>{outputHashShort}</code></dd>
-                </>
-              ) : null}
-              {receiptHashShort ? (
-                <>
-                  <dt>Receipt hash</dt>
-                  <dd><code>{receiptHashShort}</code></dd>
-                </>
-              ) : null}
-              {releaseTxShort ? (
-                <>
-                  <dt>Release tx</dt>
-                  <dd><code>{releaseTxShort}</code></dd>
-                </>
-              ) : null}
-            </dl>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={releasePayment}
-              disabled={runState !== "ready" || !onchainJobId}
-            >
-              {runState === "released" ? "Payment released" : "Release payment"}
-            </button>
-          </div>
-        </aside>
       </div>
     </main>
   );
