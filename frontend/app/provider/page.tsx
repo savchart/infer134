@@ -369,7 +369,8 @@ export default function ProviderDashboard() {
           <h1>Publish GPU + model offers</h1>
         </div>
         <div className="nav-links">
-          <Link href="/client">Buyer marketplace</Link>
+          <Link href="/">Home</Link>
+          <Link href="/client">Write prompt</Link>
         </div>
       </nav>
 

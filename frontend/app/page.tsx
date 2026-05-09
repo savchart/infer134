@@ -184,7 +184,7 @@ export default function HomePage() {
       <nav className="landing-nav">
         <div>
           <span className="eyebrow">Infer134</span>
-          <strong>GPU marketplace</strong>
+          <strong>Agent service network</strong>
         </div>
         <div className="landing-wallet">
           {walletAddress ? (
@@ -207,34 +207,62 @@ export default function HomePage() {
 
       <section className="entry-hero">
         <div>
-          <span className="eyebrow">Private offchain inference</span>
-          <h1>GPU marketplace for signed inference receipts.</h1>
+          <span className="eyebrow">Inference services for AI agents</span>
+          <h1>Let agents buy private model runs from local workers.</h1>
           <p>
-            Agents and companies choose worker-published GPU + LLM options, send prompts offchain,
-            receive execution receipts, and settle payment state locally.
+            Infer134 turns local compute into a callable service: an agent selects a worker offer,
+            sends a private prompt, receives an execution receipt, and settles payment through
+            explicit local state.
           </p>
           {walletError ? <p className="wallet-error">{walletError}</p> : null}
           <div className="hero-actions">
             <button className="primary-link action-button" type="button" onClick={() => continueAs("provider")} disabled={Boolean(roleBusy)}>
-              {roleBusy === "provider" ? (walletAddress ? "Signing provider session..." : "Connecting wallet...") : "Add GPU"}
+              {roleBusy === "provider" ? (walletAddress ? "Signing provider session..." : "Connecting wallet...") : "Provide service"}
             </button>
             <button className="secondary-link action-button" type="button" onClick={() => continueAs("client")} disabled={Boolean(roleBusy)}>
-              {roleBusy === "client" ? (walletAddress ? "Signing client session..." : "Connecting wallet...") : "Write prompt"}
+              {roleBusy === "client" ? (walletAddress ? "Signing client session..." : "Connecting wallet...") : "Use as agent"}
             </button>
           </div>
         </div>
         <div className="entry-status">
-          <span className="status-pill good">local MVP</span>
-          <span className="status-pill">Anvil settlement</span>
+          <span className="status-pill good">agent-ready API</span>
+          <span className="status-pill">receipt-gated work</span>
           <span className="status-pill">offchain prompts</span>
+        </div>
+      </section>
+
+      <section className="entry-auth-card">
+        <div className="offer-header">
+          <div>
+            <span className="eyebrow">Service workflow</span>
+            <h2>One paid inference call, readable from both sides.</h2>
+          </div>
+          <span className="status-pill">request / receipt / payment</span>
+        </div>
+        <div className="grid">
+          <article className="offer-card">
+            <span className="badge">Agent</span>
+            <h3>Buy a model run</h3>
+            <p className="muted">Choose a worker-published service, write a prompt, and pay per request.</p>
+          </article>
+          <article className="offer-card">
+            <span className="badge">Worker</span>
+            <h3>Sell local compute</h3>
+            <p className="muted">Publish runtime-ready model capacity with clear pricing and worker identity.</p>
+          </article>
+          <article className="offer-card">
+            <span className="badge">Receipt</span>
+            <h3>Prove the handoff</h3>
+            <p className="muted">Keep prompts and outputs offchain while exposing hashes, receipt state, and payment state.</p>
+          </article>
         </div>
       </section>
 
       <section className="ticker-section">
         <div className="ticker-heading">
           <div>
-            <span className="eyebrow">Available GPU capacity</span>
-            <h2>Live GPU marketplace</h2>
+            <span className="eyebrow">Services agents can call</span>
+            <h2>Live worker offers</h2>
           </div>
           <span className="status-pill">{gpuMode}</span>
         </div>
@@ -259,8 +287,8 @@ export default function HomePage() {
       <section className="ticker-section">
         <div className="ticker-heading">
           <div>
-            <span className="eyebrow">8GB LLM catalog</span>
-            <h2>HF models suitable for local workers</h2>
+            <span className="eyebrow">Agent-callable model catalog</span>
+            <h2>Small models workers can expose as a service</h2>
           </div>
           <span className="status-pill">{modelMode}</span>
         </div>
