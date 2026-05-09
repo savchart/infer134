@@ -15,6 +15,28 @@ cd ..
 
 ---
 
+## Shortcut — Anvil + деплой + backend одной командой
+
+`scripts/start_dev_stack.sh` объединяет Терминал 1 (1.1 + 1.2) и Терминал 2:
+
+```bash
+cd infer134
+bash scripts/start_dev_stack.sh
+```
+
+Скрипт:
+1. Стартует Anvil в фоне (если он ещё не поднят) — лог в `/tmp/infer134-anvil.log`.
+2. Деплоит `InferenceEscrow`.
+3. Запускает backend на `:8000` с уже подставленными `RPC_URL`, `CHAIN_ID`, `INFERENCE_ESCROW_ADDRESS`, `WORKER_PRIVATE_KEY`, `WORKER_ADDRESS`, `PROVIDER_NODE_URL`.
+
+`Ctrl+C` останавливает backend; если Anvil был запущен этим же скриптом, он тоже завершится. Anvil, поднятый в другом терминале, не трогается.
+
+Нужны `anvil`, `cast`, `forge`, `python`, `curl` на `PATH`. Если порт `:8000` занят — скрипт сразу падает с подсказкой; останавливайте старый бэкенд через `Ctrl+C` перед перезапуском.
+
+Терминалы 3 (frontend), 4 (provider-node), 5 (vLLM) запускаются отдельно — см. ниже.
+
+---
+
 ## Терминал 1 — Local Blockchain (Anvil + InferenceEscrow)
 
 Запускает локальный EVM-узел и деплоит контракт эскроу.
@@ -166,8 +188,8 @@ cd infer134
 |----------|-----------|
 | Самое простое (fixture mode на UI) | 3 |
 | API-демо без ончейна, mock-инференс | 2, 4 (+ 3 для UI) |
-| API-демо c ончейн-эскроу, mock-инференс | 1, 2, 4 (+ 3) |
-| Полный демо c реальным локальным инференсом | 1, 2, 3, 4, 5 |
+| API-демо c ончейн-эскроу, mock-инференс | `start_dev_stack.sh`, 4 (+ 3) |
+| Полный демо c реальным локальным инференсом | `start_dev_stack.sh`, 3, 4, 5 |
 
 ## Остановка
 
