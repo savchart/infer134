@@ -13,5 +13,5 @@ def test_health_returns_ok() -> None:
     assert body["status"] == "ok"
     assert body["service"] == "infer134-worker-node"
     assert body["worker_name"] == "gpu-prague.eth"
-    assert body["model"] == "mock-llama"
-
+    assert body["runtime"] in {"mock", "vllm"}
+    assert body["model"]
