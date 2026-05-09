@@ -36,7 +36,7 @@ Judging criteria mapping:
 - **Technicality:** backend job lifecycle, worker node, receipt hashing/signing abstraction, contract escrow test, and local tests.
 - **Originality:** pay-per-inference settlement metadata for AI agents without putting prompts or outputs onchain.
 - **Practicality:** local demo path with deterministic workers and clear extension points for ENS, x402, stablecoins, and local model servers.
-- **UX/aesthetics:** `/demo` turns blockchain actions into readable states: discovered, escrowed, running, verified, paid.
+- **UX/aesthetics:** `/client` collapses pay-per-inference into one button — wallet signs `createJob{value}`, the backend gates inference on the verified onchain escrow, and the buyer sees readable states: paying, running, ready, paid.
 - **Wow factor:** agents can buy private compute from named workers and receive execution receipts that are easy to inspect.
 
 ## Primary Track: Network Economy
@@ -52,15 +52,15 @@ The secondary track is **Future Society**. Infer134 supports privacy-respecting 
 - **Umia: Best Agentic Venture:** deterministic agent route, worker selection, paid job flow, and a plausible marketplace revenue path.
 - **ENS: Best ENS Integration for AI Agents:** mocked ENS-style identities for `research-agent.eth` and `gpu-prague.eth`, plus explicit resolver endpoints that can be replaced with real ENS/text records.
 - **ETHPrague: Best Privacy by Design:** prompts and outputs stay offchain; settlement metadata uses hashes and payment state.
-- **ETHPrague: Best UX Flow:** `/demo` explains each state in plain language instead of showing raw contract complexity first.
+- **ETHPrague: Best UX Flow:** `/client` is one Pay & run click — the buyer's wallet signs the escrow, the backend verifies onchain state, inference runs, and the receipt is shown without exposing raw contract complexity.
 - **Optional Best Hardware Usage:** strongest only if the worker node is shown running on tangible local hardware during the demo.
 
 ## 5-Minute Demo Flow
 
 1. **Problem, 20 seconds:** agents need to buy inference without opaque billing or public prompts.
 2. **Solution, 30 seconds:** Infer134 gives each job a worker, payment state, and execution receipt.
-3. **Guided UI, 90 seconds:** open `/demo` and show agent -> worker discovery -> payment escrowed -> inference -> receipt -> payment paid.
-4. **API path, 60 seconds:** run `scripts/demo_flow.sh` to show the same state machine through curl.
+3. **Guided UI, 90 seconds:** open `/client`, pick a GPU + model offer, write a prompt, and click **Pay & run**. The wallet signs `createJob{value}` on local Anvil, the backend verifies the onchain escrow, runs inference, and returns the signed receipt.
+4. **API path, 60 seconds:** run `scripts/demo_flow.sh` to show the same path through `cast send` + `curl /jobs/run-paid`.
 5. **Architecture, 60 seconds:** backend coordinator, worker node, local contract, identity resolver, receipt verifier.
 6. **Trust model and bounties, 60 seconds:** explain what is verified, trusted, offchain, and future work.
 
@@ -142,10 +142,11 @@ This is not production billing. It is the catalog layer the buyer flow can use b
 
 Infer134 includes a minimal local wallet-auth flow for the MVP:
 
-- clients connect a browser wallet and sign a challenge before creating buyer jobs;
-- providers connect a browser wallet and sign a challenge before publishing worker offers;
+- clients connect a browser wallet on `/` and sign a challenge before opening `/client`;
+- providers connect a browser wallet and sign a challenge before publishing worker offers on `/provider`;
 - backend stores an in-memory session token tied to `client` or `provider` role;
-- the UI falls back to fixture mode when no browser wallet is available.
+- the auth session is optional in the buyer flow — `/jobs/run-paid` can be called anonymously, since the actual buyer authority is the wallet that signed the on-chain `createJob{value}` transaction;
+- after a backend restart, stored localStorage tokens are silently treated as anonymous and the UI re-prompts for a fresh signature.
 
 Endpoints:
 
@@ -160,32 +161,28 @@ This is not production SIWE. The MVP records the wallet signature and session, b
 
 ## Demo Flow
 
-The primary MVP route is `/demo`. It is not a marketing page first; it is the buyer journey itself.
+The primary MVP route is `/client` — a single-step pay-and-run buyer page.
 
-1. Buyer starts as `research-agent.eth`.
-2. Buyer chooses an allowlisted model or mock fallback.
-3. Buyer enters a prompt and sees `input_hash`.
-4. Buyer selects `gpu-prague.eth`.
-5. Buyer creates escrow/payment state.
-6. Worker runs inference offchain.
-7. Buyer verifies the execution receipt.
-8. Buyer releases payment and sees the final result.
+1. Buyer connects a wallet on the homepage and signs an `Infer134` auth challenge to open `/client`.
+2. Buyer picks an offer (worker + GPU + model + price) from live `/offers` published by provider-node.
+3. Buyer writes a prompt; the page computes `input_hash = sha256(prompt)`.
+4. Buyer clicks **Pay & run**. The wallet signs `createJob(workerAddress, inputHash){value}` on local Anvil; the page parses the `JobCreated` event for `onchain_job_id` and posts `{onchain_job_id, tx_hash, prompt, offer_id}` to `/jobs/run-paid`.
+5. Backend verifies the onchain escrow (status, `inputHash` == sha256(prompt), worker matches the offer, tx receipt buyer matches escrow buyer), then runs inference and signs the receipt; the worker key submits `submitResult` onchain.
+6. UI shows the offchain output, hashes, and a phase indicator.
+7. Optional: the buyer's wallet signs `releasePayment(uint256)` to release ETH from escrow to the worker.
 
-The wizard labels connected and degraded modes explicitly:
-
-- `Backend connected` or `Fixture mode: backend unavailable`.
-- `Local Anvil connected` or `Mock settlement: chain unavailable`.
-- `Local worker connected` or `Mock inference: provider-node unavailable`.
+`/client` blocks Pay & run with a concrete reason whenever any precondition fails: backend offline, Anvil/escrow unconfigured, no offer or prompt, wallet not connected, wallet on the wrong chain, or wallet account different from the signed-in session.
 
 ## MVP Architecture
 
-- `backend/`: FastAPI coordinator with in-memory storage, worker registry, job lifecycle, agent route, and execution receipt verification.
+- `backend/`: FastAPI coordinator with in-memory storage, worker registry, model registry, the `POST /jobs/run-paid` endpoint that gates inference on the verified onchain escrow, and execution receipt verification.
 - `provider-node/`: FastAPI worker node with deterministic mock inference by default and optional local vLLM/Hugging Face inference.
-- `contracts/`: Foundry contract for local Anvil escrow and hash-based settlement metadata.
-- `frontend/`: minimal Next.js TypeScript placeholders for buyer, worker, agent, and job-status views.
-- `scripts/demo_flow.sh`: curl-based local API demo.
+- `contracts/`: Foundry `InferenceEscrow.sol` for local Anvil escrow and hash-based settlement metadata.
+- `frontend/`: Next.js 13 / TypeScript app with `/` (wallet entry + live offers ticker), `/client` (single-step pay-and-run buyer page), and `/provider` (publish GPU + model offers).
+- `scripts/start_dev_stack.sh`: one-command orchestrator (anvil + deploy + backend with env wired in).
+- `scripts/demo_flow.sh`: end-to-end demo via `cast send createJob{value}` + `curl /jobs/run-paid` + `cast send releasePayment`.
 
-The backend is trusted in this MVP. It coordinates workers, stores offchain prompts/results/receipts, and can link local jobs to Anvil escrow state.
+The backend is trusted in this MVP. It coordinates workers, stores offchain prompts/results/receipts, reads the onchain escrow state via `cast call jobs(uint256)` to gate inference, and submits the worker's receipt onchain via `WORKER_PRIVATE_KEY`.
 
 ## Trust Assumptions and Threat Model
 
@@ -225,27 +222,35 @@ The backend is trusted in this MVP. It coordinates workers, stores offchain prom
 
 Infer134 uses Anvil as a local Ethereum testnet for the realistic escrow/payment-state demo. It does not use public testnets and does not use real funds.
 
-Terminal 1, start local chain:
+The fastest path is the orchestrator script, which starts Anvil, deploys `InferenceEscrow`, and starts the backend with the right env in one command:
 
 ```bash
 cd infer134
-bash scripts/start_anvil.sh
+bash scripts/start_dev_stack.sh
 ```
 
-Terminal 2, deploy escrow contract:
+If you prefer running the pieces yourself:
 
 ```bash
 cd infer134
-bash scripts/deploy_local.sh
+bash scripts/start_anvil.sh        # terminal 1: anvil on :8545
+bash scripts/deploy_local.sh       # terminal 1b: writes contracts/deployments/localhost.json
 ```
 
-The deployment script writes:
+Then start the backend with the chain config wired in. For the buyer-signed pay-and-run flow you only need `WORKER_PRIVATE_KEY` (the buyer signs `createJob{value}` from the browser wallet):
 
-```text
-contracts/deployments/localhost.json
+```bash
+cd infer134/backend
+RPC_URL=http://127.0.0.1:8545 \
+CHAIN_ID=31337 \
+INFERENCE_ESCROW_ADDRESS=<address from contracts/deployments/localhost.json> \
+WORKER_PRIVATE_KEY=<anvil-dev-worker-private-key> \
+WORKER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8 \
+PROVIDER_NODE_URL=http://127.0.0.1:8010 \
+  python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Use the generated address as `INFERENCE_ESCROW_ADDRESS` for the backend and as `NEXT_PUBLIC_INFERENCE_ESCROW_ADDRESS` for the frontend if wallet wiring is added.
+`WORKER_ADDRESS` must match `WORKER_PRIVATE_KEY`, and the provider you registered on `/provider` must use that same address — otherwise `submitResult` reverts with `NotWorker`. `BUYER_PRIVATE_KEY` is only required by the autonomous `POST /agent/tasks` route (where the backend acts as the buyer).
 
 Optional contract-only demo:
 
@@ -254,22 +259,7 @@ cd infer134
 bash scripts/demo_chain_flow.sh
 ```
 
-Start backend with local chain config:
-
-```bash
-cd infer134/backend
-RPC_URL=http://127.0.0.1:8545 CHAIN_ID=31337 INFERENCE_ESCROW_ADDRESS=<address> python -m uvicorn app.main:app --reload
-```
-
-To let the backend create, submit, and release real local Anvil escrow transactions, also provide local-only Anvil dev keys in your shell:
-
-```bash
-export BUYER_PRIVATE_KEY=<anvil-dev-buyer-private-key>
-export WORKER_PRIVATE_KEY=<anvil-dev-worker-private-key>
-export WORKER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-```
-
-Do not use real private keys. The `WORKER_ADDRESS` must match `WORKER_PRIVATE_KEY` so the contract accepts worker result submission.
+Do not use real private keys. Anvil dev keys are local-only test keys.
 
 Check chain status:
 
@@ -426,20 +416,13 @@ npm run dev
 
 Routes:
 
-- `/`: wallet entrypoint. Users connect a wallet, then see available GPU + model offers with actions to add GPU capacity or run inference.
-- `/demo`: primary buyer-centric MVP wizard.
-- `/provider`: provider setup flow for publishing GPU + model offers.
+- `/`: wallet entrypoint. Users connect a wallet, sign an auth challenge, and pick a role (buyer or provider). Live `/offers` ticker shows what providers have published.
+- `/client`: single-step pay-and-run buyer page. Pick offer → write prompt → Pay & run. Wallet signs `createJob{value}`, the backend gates inference on the verified onchain escrow, then UI shows result + receipt + optional Release payment.
+- `/provider`: provider setup flow for publishing GPU + model offers. The address you sign in with becomes the worker address, so it must match `WORKER_PRIVATE_KEY` on the backend.
 
-The wizard works in two modes:
+The buyer page surfaces preflight blockers (backend up, anvil up, wallet connected, on chain 31337, account matches session) before enabling Pay & run, and reads the live MetaMask account + chain id so changes are reflected immediately.
 
-- **Backend-connected mode:** the frontend calls the backend through a same-origin Next.js proxy using `NEXT_PUBLIC_API_BASE_URL`. It creates a local job, claims it with a worker, runs inference, submits a receipt, and marks payment paid.
-- **Fixture mode:** if the backend is unavailable, the full 8-step flow still runs with deterministic fixture hashes, fixture transaction hash, mock inference output, and clear degraded-mode labels.
-
-Optional provider status uses `NEXT_PUBLIC_PROVIDER_NODE_URL` and falls back to:
-
-```text
-Mock inference: provider-node unavailable
-```
+API base URL is the same-origin Next.js proxy at `/api/infer134/...`, configurable via `NEXT_PUBLIC_API_BASE_URL`. Provider-node liveness check uses `NEXT_PUBLIC_PROVIDER_NODE_URL`.
 
 Contracts with local Anvil:
 
@@ -451,30 +434,25 @@ anvil
 
 ## API Demo
 
-After starting the worker node and backend:
+After starting Anvil, deploying the contract, and bringing up provider-node + backend (or simply running `bash scripts/start_dev_stack.sh`):
 
 ```bash
 cd infer134
 ./scripts/demo_flow.sh
 ```
 
-The script demonstrates health checks, worker registration, job creation, open job listing, claiming, running, submitting, payment, and receipt fetching.
+The script registers a worker, picks the first offer, computes the prompt's input hash, signs `createJob{value}` with the Anvil dev buyer key via `cast send`, parses `onchain_job_id` from the `JobCreated` log, calls `POST /jobs/run-paid`, fetches the receipt, and signs `releasePayment(uint256)`.
 
 ## Submission Checklist
 
-- [ ] Devfolio project name: Infer134.
-- [ ] Tagline: Private offchain inference with signed execution receipts and programmable payment settlement.
-- [ ] Open-source repo: https://github.com/savchart/infer134.
-- [ ] Demo video: TBD.
-- [ ] Contract address: TBD if deployed.
-- [ ] Primary track: Network Economy.
-- [ ] Secondary track: Future Society.
+See [`SUBMISSION.md`](SUBMISSION.md) for the canonical checklist. Short version:
+
+- [ ] Public repo: https://github.com/savchart/infer134.
+- [ ] Demo video recorded.
+- [ ] Tracks: Network Economy (primary), Future Society (secondary).
 - [ ] Bounties: Umia, ENS, Best Privacy by Design, Best UX Flow, optional Best Hardware Usage.
-- [ ] Team members: TBD.
-- [ ] Five-minute pitch: see `PITCH.md`.
-- [ ] Judging demo script: see `DEMO_SCRIPT.md`.
-- [ ] Trust model: see `docs/trust-model.md`.
-- [ ] Bounty fit: see `docs/bounty-fit.md`.
+- [ ] Team members listed on Devfolio.
+- [ ] Pitch: [`PITCH.md`](PITCH.md). Demo script: [`DEMO_SCRIPT.md`](DEMO_SCRIPT.md). Trust model: [`docs/trust-model.md`](docs/trust-model.md). Bounty fit: [`docs/bounty-fit.md`](docs/bounty-fit.md). Local startup: [`DEMO_INSTRUCTIONS.md`](DEMO_INSTRUCTIONS.md).
 
 ## Testing
 
