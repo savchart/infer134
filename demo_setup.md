@@ -1,11 +1,8 @@
-start_dev_stack.sh
-==================
+# Local Demo Setup
 
-Run commands from the repository root:
-
-```bash
-cd infer134
-```
+> All shell commands below assume your current directory is `infer134/`.
+> If you are at the repo root (`eth_prague_26/`), `cd infer134` once at the start
+> and stay there. The instructions never re-enter `infer134/`.
 
 ## Fast Local Stack
 
@@ -29,8 +26,7 @@ Stop it with `Ctrl+C`. If the script started Anvil, it stops that Anvil process 
 Run the Next.js UI in another terminal:
 
 ```bash
-cd infer134/frontend
-npm run dev
+( cd frontend && npm run dev )
 ```
 
 Open:
@@ -39,26 +35,52 @@ Open:
 http://localhost:3000/client
 ```
 
-## Provider Node
+## Provider Node — Mock Mode
 
 For the default deterministic mock worker, run in another terminal:
 
 ```bash
-cd infer134/provider-node
-python -m uvicorn app.main:app --reload --port 8010
+( cd provider-node && python -m uvicorn app.main:app --reload --port 8010 )
 ```
 
-For local vLLM mode, start the model server first:
+This needs only the base provider-node dependencies. Install once:
 
 ```bash
-cd infer134
+( cd provider-node && python -m pip install -e . )
+```
+
+## Provider Node — vLLM Mode
+
+vLLM is **not** in the provider-node base dependencies (it is a heavy GPU
+package). Install it into the provider-node virtualenv first, ideally via the
+`vllm` optional-dependencies group:
+
+```bash
+cd provider-node
+source .venv/bin/activate          # or activate however your venv is set up
+python -m pip install -e '.[vllm]'
+cd ..
+```
+
+Verify it imports:
+
+```bash
+( cd provider-node && python -c "import vllm; print(vllm.__version__)" )
+```
+
+If vLLM exits with `NVIDIA driver on your system is too old`, update the GPU
+driver or pin compatible PyTorch / vLLM wheels for your CUDA driver.
+
+Then start the model server (terminal A):
+
+```bash
 bash scripts/start_vllm_worker.sh
 ```
 
-Then start provider-node with vLLM runtime:
+And the provider-node in vLLM runtime (terminal B):
 
 ```bash
-cd infer134/provider-node
+cd provider-node
 INFER134_RUNTIME=vllm \
 INFER134_MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct \
 INFER134_MODEL_REVISION=main \
@@ -66,16 +88,18 @@ INFER134_VLLM_BASE_URL=http://127.0.0.1:8001/v1 \
 INFER134_VLLM_API_KEY=infer134-local \
 HF_HOME=.hf-cache \
   python -m uvicorn app.main:app --reload --port 8010
+cd ..
 ```
+
+Allowlisted models: `Qwen/Qwen2.5-0.5B-Instruct`, `Qwen/Qwen3-0.6B`,
+`HuggingFaceTB/SmolLM2-360M-Instruct`. Buyers cannot request arbitrary models.
 
 ## Manual Backend Only
 
 If you do not need local chain settlement, run backend manually:
 
 ```bash
-cd infer134/backend
-PROVIDER_NODE_URL=http://127.0.0.1:8010 \
-  python -m uvicorn app.main:app --reload --port 8000
+( cd backend && PROVIDER_NODE_URL=http://127.0.0.1:8010 python -m uvicorn app.main:app --reload --port 8000 )
 ```
 
 ## Checks
@@ -89,6 +113,5 @@ curl http://127.0.0.1:8010/health
 Run the API demo after backend and provider-node are up:
 
 ```bash
-cd infer134
 ./scripts/demo_flow.sh
 ```

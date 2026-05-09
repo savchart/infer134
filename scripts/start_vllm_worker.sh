@@ -19,6 +19,26 @@ echo "GPU memory utilization: $GPU_MEMORY_UTILIZATION"
 echo "WARNING: this is a local demo runtime. Do not put real secrets in public identity records or logs."
 echo "If vLLM exits with 'NVIDIA driver on your system is too old', update the driver or install PyTorch/vLLM wheels compatible with your local CUDA driver."
 
+if ! python -c "import vllm" >/dev/null 2>&1; then
+  cat <<'HINT' >&2
+
+vLLM is not installed in the current Python environment.
+
+Install it into the provider-node virtualenv (recommended):
+
+    cd provider-node
+    source .venv/bin/activate
+    python -m pip install -e '.[vllm]'
+
+Or directly:
+
+    python -m pip install vllm
+
+Then re-run scripts/start_vllm_worker.sh.
+HINT
+  exit 1
+fi
+
 EXTRA_ARGS=()
 if [[ "$ENFORCE_EAGER" == "1" || "$ENFORCE_EAGER" == "true" ]]; then
   EXTRA_ARGS+=(--enforce-eager)

@@ -15,5 +15,12 @@ dependencies = [
   "httpx>=0.27,<1"
 ]
 
+[project.optional-dependencies]
+# Heavy GPU runtime; install only when running INFER134_RUNTIME=vllm.
+# Pin a major range that supports Turing-class GPUs (sm_70+, e.g. RTX 2070).
+vllm = [
+  "vllm>=0.5,<1",
+]
+
 [tool.setuptools.packages.find]
 include = ["app*"]
