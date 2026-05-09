@@ -52,20 +52,21 @@ This needs only the base provider-node dependencies. Install once:
 ## Provider Node — vLLM Mode
 
 vLLM is **not** in the provider-node base dependencies (it is a heavy GPU
-package). Install it into the provider-node virtualenv first, ideally via the
-`vllm` optional-dependencies group:
+package). Use the virtualenv from the project root:
+`/home/savchart/PycharmProjects/eth_prague_26/.venv`.
+
+From `infer134/`, activate it and install the provider-node vLLM extras:
 
 ```bash
-cd provider-node
-source .venv/bin/activate          # or activate however your venv is set up
-python -m pip install -e '.[vllm]'
-cd ..
+source ../.venv/bin/activate
+( cd provider-node && python -m pip install -e '.[vllm]' )
 ```
 
 Verify it imports:
 
 ```bash
-( cd provider-node && python -c "import vllm; print(vllm.__version__)" )
+source ../.venv/bin/activate
+python -c "import vllm; print(vllm.__version__)"
 ```
 
 If vLLM exits with `NVIDIA driver on your system is too old`, update the GPU
@@ -74,12 +75,14 @@ driver or pin compatible PyTorch / vLLM wheels for your CUDA driver.
 Then start the model server (terminal A):
 
 ```bash
+source ../.venv/bin/activate
 bash scripts/start_vllm_worker.sh
 ```
 
 And the provider-node in vLLM runtime (terminal B):
 
 ```bash
+source ../.venv/bin/activate
 cd provider-node
 INFER134_RUNTIME=vllm \
 INFER134_MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct \
