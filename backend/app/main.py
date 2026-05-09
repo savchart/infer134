@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
+import urllib.request
+
 from fastapi import FastAPI, HTTPException
 
+from app.auth import create_auth_challenge, get_auth_session, logout_auth_session, verify_auth_challenge
 from app.chain import chain_status
 from app.identity import get_identity_metadata, identity_metadata, resolve_name
 from app.jobs import (
@@ -24,6 +30,9 @@ from app.model_registry import (
 )
 from app.models import (
     AgentTaskRequest,
+    AuthChallengeRequest,
+    AuthLogoutRequest,
+    AuthVerifyRequest,
     ClaimJobRequest,
     CreateJobRequest,
     PrepareModelRequest,
@@ -33,7 +42,7 @@ from app.models import (
     RunJobRequest,
     SubmitJobRequest,
 )
-from app.providers import get_worker, list_workers, register_worker
+from app.providers import get_worker, list_offers, list_worker_offers, list_workers, register_worker
 from app.receipts import verify_execution_receipt
 from app.store import STORE
 
@@ -49,6 +58,31 @@ def _handle_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
+def _provider_connected() -> bool:
+    provider_url = os.getenv("PROVIDER_NODE_URL", "http://127.0.0.1:8010").rstrip("/")
+    request = urllib.request.Request(provider_url + "/health", method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=1) as response:
+            json.loads(response.read().decode("utf-8"))
+            return response.status == 200
+    except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+        return False
+
+
+def _demo_modes() -> dict[str, bool]:
+    chain = chain_status()
+    chain_connected = bool(chain.get("chain_enabled") and not chain.get("error"))
+    provider_connected = _provider_connected()
+    return {
+        "backend_connected": True,
+        "chain_connected": chain_connected,
+        "provider_connected": provider_connected,
+        "fixture_mode": False,
+        "mock_settlement": not chain_connected,
+        "mock_inference": not provider_connected,
+    }
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {
@@ -56,6 +90,41 @@ def health() -> dict[str, str]:
         "service": "infer134-backend",
         "mode": "local-mvp",
     }
+
+
+@app.post("/auth/challenge")
+def auth_challenge_endpoint(request: AuthChallengeRequest):
+    try:
+        return create_auth_challenge(STORE, request)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@app.post("/auth/verify")
+def auth_verify_endpoint(request: AuthVerifyRequest):
+    try:
+        session = verify_auth_challenge(STORE, request)
+        return {
+            "session": session,
+            "verification_status": session.verification_status,
+            "trusted": ["wallet signature string was recorded", "backend session is in memory"],
+            "not_verified": ["signer recovery", "SIWE domain binding", "production authorization"],
+        }
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@app.get("/auth/session/{session_token}")
+def auth_session_endpoint(session_token: str):
+    try:
+        return get_auth_session(STORE, session_token)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@app.post("/auth/logout")
+def auth_logout_endpoint(request: AuthLogoutRequest):
+    return logout_auth_session(STORE, request)
 
 
 @app.get("/chain/status")
@@ -109,6 +178,19 @@ def worker_models_endpoint(worker_id: str):
         raise _handle_value_error(exc) from exc
 
 
+@app.get("/workers/{worker_id}/offers")
+def worker_offers_endpoint(worker_id: str):
+    try:
+        return list_worker_offers(STORE, worker_id)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
+@app.get("/offers")
+def offers_endpoint():
+    return list_offers(STORE)
+
+
 @app.post("/providers/register")
 def legacy_register_provider_endpoint(request: RegisterWorkerRequest):
     return register_worker(STORE, request)
@@ -154,6 +236,7 @@ def create_job_endpoint(request: CreateJobRequest):
             "payment_explanation": "payment required -> mocked payment state accepted",
             "offchain": ["prompt", "result", "full receipt"],
             "hashable_metadata": ["input_hash", "output_hash", "receipt_hash", "worker", "price", "payment_state"],
+            "demo_modes": _demo_modes(),
         }
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
@@ -177,6 +260,7 @@ def job_endpoint(job_id: str):
             "job": job,
             "offchain": ["prompt", "result", "full receipt"],
             "hashable_metadata": ["input_hash", "output_hash", "receipt_hash", "worker", "price", "payment_state"],
+            "demo_modes": _demo_modes(),
         }
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
@@ -193,7 +277,9 @@ def claim_job_endpoint(job_id: str, request: ClaimJobRequest):
 @app.post("/jobs/{job_id}/run")
 def run_job_endpoint(job_id: str, request: RunJobRequest = RunJobRequest()):
     try:
-        return run_job(STORE, job_id, request)
+        result = run_job(STORE, job_id, request)
+        result["demo_modes"] = _demo_modes()
+        return result
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -201,7 +287,9 @@ def run_job_endpoint(job_id: str, request: RunJobRequest = RunJobRequest()):
 @app.post("/jobs/{job_id}/submit")
 def submit_job_endpoint(job_id: str, request: SubmitJobRequest = SubmitJobRequest()):
     try:
-        return submit_job(STORE, job_id, request)
+        result = submit_job(STORE, job_id, request)
+        result["demo_modes"] = _demo_modes()
+        return result
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -217,7 +305,9 @@ def legacy_complete_job_endpoint(job_id: str, request: SubmitJobRequest = Submit
 @app.post("/jobs/{job_id}/pay")
 def pay_job_endpoint(job_id: str, request: PayJobRequest = PayJobRequest()):
     try:
-        return pay_job(STORE, job_id, request)
+        result = pay_job(STORE, job_id, request)
+        result["demo_modes"] = _demo_modes()
+        return result
     except ValueError as exc:
         raise _handle_value_error(exc) from exc
 
@@ -241,6 +331,7 @@ def receipt_endpoint(job_id: str):
         "offchain": ["prompt", "result", "full receipt"],
         "verified": ["input hash integrity", "output hash integrity", "receipt hash integrity", "demo signature"],
         "trusted": ["backend coordinator", "worker inference correctness", "mocked payment state"],
+        "demo_modes": _demo_modes(),
     }
 
 

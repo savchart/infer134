@@ -6,11 +6,13 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-from app.chain import settlement_metadata
+from app.auth import get_role_session
+from app.chain import create_escrow_job, release_escrow_payment, settlement_metadata, submit_escrow_result
 from app.identity import resolve_name
 from app.model_registry import get_model, get_worker_model_capability
 from app.models import (
     AgentTaskRequest,
+    AuthRole,
     ClaimJobRequest,
     CreateJobRequest,
     Job,
@@ -21,6 +23,7 @@ from app.models import (
 )
 from app.providers import choose_worker, ensure_default_worker, get_worker
 from app.receipts import build_execution_receipt, sha256_hex, verify_execution_receipt
+from app.settings import get_chain_settings
 from app.store import InMemoryStore
 
 
@@ -34,13 +37,15 @@ TRUST_NOTES = [
 
 
 def create_job(store: InMemoryStore, request: CreateJobRequest) -> Job:
-    buyer = request.buyer_address or resolve_name(request.buyer_name)
+    auth_session = get_role_session(store, request.auth_token, AuthRole.CLIENT)
+    buyer = auth_session.address if auth_session else request.buyer_address or resolve_name(request.buyer_name)
+    buyer_name = auth_session.ens_style_name if auth_session and auth_session.ens_style_name else request.buyer_name
     input_hash = sha256_hex(request.prompt)
     model = get_model(store, request.model_id)
     job = Job(
         job_id=store.next_job_id(),
         buyer=buyer,
-        buyer_name=request.buyer_name,
+        buyer_name=buyer_name,
         prompt=request.prompt,
         input_hash=input_hash,
         prompt_hash=input_hash,
@@ -61,6 +66,8 @@ def create_job(store: InMemoryStore, request: CreateJobRequest) -> Job:
         payment_state=PaymentState.ESCROWED,
         payment_trace=[PaymentState.UNPAID.value, PaymentState.ESCROWED.value],
         trust_notes=list(TRUST_NOTES),
+        auth_session_token=auth_session.session_token if auth_session else None,
+        auth_verification_status=auth_session.verification_status if auth_session else None,
     )
     store.jobs[job.job_id] = job
 
@@ -111,6 +118,17 @@ def claim_job(store: InMemoryStore, job_id: str, request: ClaimJobRequest) -> Jo
     job.inference_fee = capability.inference_fee
     job.price = job.price or capability.inference_fee
     job.status = JobStatus.CLAIMED
+    if not job.onchain_job_id:
+        try:
+            chain_settings = get_chain_settings()
+            if chain_settings.chain_write_enabled and chain_settings.worker_address:
+                job.worker = chain_settings.worker_address
+            chain_result = create_escrow_job(job.worker, job.input_hash)
+            job.onchain_job_id = chain_result["onchain_job_id"]
+            job.onchain_tx_hash_create = chain_result["tx_hash"]
+            job.chain_payment_state = chain_result["chain_payment_state"]
+        except Exception:
+            job.chain_payment_state = "mock_settlement"
     store.jobs[job_id] = job
     return job
 
@@ -258,6 +276,13 @@ def submit_job(store: InMemoryStore, job_id: str, request: SubmitJobRequest) -> 
     verification = verify_execution_receipt(receipt)
     job.receipt_hash = receipt.receipt_hash
     job.worker_signature = receipt.signature
+    if job.onchain_job_id:
+        try:
+            chain_result = submit_escrow_result(job.onchain_job_id, job.output_hash, job.receipt_hash)
+            job.onchain_tx_hash_submit = chain_result["tx_hash"]
+            job.chain_payment_state = chain_result["chain_payment_state"]
+        except Exception:
+            job.chain_payment_state = "mock_settlement"
     job.status = JobStatus.SUBMITTED
     job.payment_state = PaymentState.PAYABLE
     job.payment_trace.append(PaymentState.PAYABLE.value)
@@ -284,7 +309,12 @@ def pay_job(store: InMemoryStore, job_id: str, request: Any | None = None) -> di
     if request and getattr(request, "chain_payment_state", None):
         job.chain_payment_state = request.chain_payment_state
     elif job.onchain_job_id:
-        job.chain_payment_state = "paid"
+        try:
+            chain_result = release_escrow_payment(job.onchain_job_id)
+            job.onchain_tx_hash_release = chain_result["tx_hash"]
+            job.chain_payment_state = chain_result["chain_payment_state"]
+        except Exception:
+            job.chain_payment_state = "mock_settlement"
     job.payment_trace.append(PaymentState.PAID.value)
     store.jobs[job_id] = job
     receipt = store.receipts.get(job_id)
