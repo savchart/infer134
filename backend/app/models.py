@@ -39,6 +39,60 @@ class ModelSourceType(str, Enum):
     ADAPTER = "adapter"
 
 
+class AuthRole(str, Enum):
+    CLIENT = "client"
+    PROVIDER = "provider"
+
+
+class AuthChallengeRequest(BaseModel):
+    address: str
+    role: AuthRole
+    ens_style_name: str | None = None
+
+
+class AuthChallenge(BaseModel):
+    challenge_id: str
+    address: str
+    role: AuthRole
+    ens_style_name: str | None = None
+    message: str
+    nonce: str
+    issued_at: str
+    expires_at: str
+
+
+class AuthVerifyRequest(BaseModel):
+    challenge_id: str
+    address: str
+    role: AuthRole
+    signature: str
+
+
+class AuthSession(BaseModel):
+    session_token: str
+    address: str
+    role: AuthRole
+    ens_style_name: str | None = None
+    signature: str
+    challenge_id: str
+    created_at: str
+    verification_status: str = "demo_signature_recorded"
+    trust_note: str = "Wallet signature is recorded for the local MVP; signer recovery is not production-verified."
+
+
+class AuthLogoutRequest(BaseModel):
+    session_token: str
+
+
+class GpuCapability(BaseModel):
+    gpu_id: str = "local-rtx-2070"
+    display_name: str = "NVIDIA RTX 2070"
+    memory_gb: int = 8
+    runtime: str = "vllm"
+    status: str = "available"
+    notes: str = "Local demo GPU capability claimed by the worker."
+
+
 class ModelSpec(BaseModel):
     model_id: str = "mock-llama"
     display_name: str = "Mock Llama"
@@ -64,6 +118,9 @@ class WorkerModelCapability(BaseModel):
     readiness_state: ModelReadinessState = ModelReadinessState.READY
     cold_start_fee: str = "0 USDC"
     inference_fee: str = "0.01 USDC"
+    price_per_1m_input_tokens: str = "0.50 local ETH"
+    price_per_1m_output_tokens: str = "1.50 local ETH"
+    currency: str = "local ETH"
 
 
 class ModelPreparationJob(BaseModel):
@@ -96,7 +153,10 @@ class Worker(BaseModel):
     price: str = "0.01 USDC"
     status: str = "available"
     endpoint: str = "http://127.0.0.1:8010"
+    gpu_capabilities: list[GpuCapability] = Field(default_factory=list)
     model_capabilities: list[WorkerModelCapability] = Field(default_factory=list)
+    auth_session_token: str | None = None
+    auth_verification_status: str | None = None
 
 
 class RegisterWorkerRequest(BaseModel):
@@ -107,7 +167,33 @@ class RegisterWorkerRequest(BaseModel):
     price: str = "0.01 USDC"
     status: str = "available"
     endpoint: str = "http://127.0.0.1:8010"
+    gpu_capabilities: list[GpuCapability] | None = None
     model_capabilities: list[WorkerModelCapability] | None = None
+    auth_token: str | None = None
+
+
+class WorkerOffer(BaseModel):
+    offer_id: str
+    worker_id: str
+    worker_name: str
+    worker_address: str
+    worker_status: str
+    gpu_id: str
+    gpu_name: str
+    gpu_memory_gb: int
+    gpu_status: str
+    model_id: str
+    model_source: ModelSourceType
+    model_revision: str
+    model_hash: str
+    runtime: str
+    readiness_state: ModelReadinessState
+    cold_start_fee: str
+    inference_fee: str
+    price_per_1m_input_tokens: str
+    price_per_1m_output_tokens: str
+    currency: str
+    endpoint: str
 
 
 class RegisterModelRequest(BaseModel):
@@ -148,6 +234,7 @@ class CreateJobRequest(BaseModel):
     onchain_job_id: str | None = None
     onchain_tx_hash_create: str | None = None
     chain_payment_state: str | None = None
+    auth_token: str | None = None
 
 
 class ClaimJobRequest(BaseModel):
@@ -223,6 +310,8 @@ class Job(BaseModel):
     worker_signature: str | None = None
     receipt_verified: bool = False
     trust_notes: list[str] = Field(default_factory=list)
+    auth_session_token: str | None = None
+    auth_verification_status: str | None = None
 
 
 class ExecutionReceipt(BaseModel):
