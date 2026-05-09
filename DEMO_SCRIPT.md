@@ -12,22 +12,28 @@ AI agents will increasingly buy small units of work from external services. Infe
 
 Infer134 is a pay-per-inference market for agents and companies. Workers execute jobs offchain and return signed execution receipts. The system keeps prompts and outputs private while exposing hashes, worker identity, and payment state as settlement metadata.
 
-## 0:50-2:20 Guided UI Flow
+## 0:50-2:50 Guided UI Flow
 
-Open `/demo` and press the demo button.
+Open `/demo`. The MVP is the buyer journey.
 
-1. Agent identity appears: `research-agent.eth`.
-2. Worker discovery selects `gpu-prague.eth`.
-3. Worker capabilities are shown: `mock-llama`, simulated/local worker, execution receipts.
-4. Payment state moves from `unpaid` to `escrowed`.
-5. Inference runs offchain.
-6. Input hash, output hash, and receipt hash appear.
-7. Receipt verification is shown as passed.
-8. Payment state moves to `paid`.
+1. Start as `research-agent.eth`.
+2. Choose a worker-advertised model such as `Qwen/Qwen2.5-0.5B-Instruct` or mock fallback.
+3. Enter the prompt and show `input_hash`.
+4. Select `gpu-prague.eth`.
+5. Create escrow and show payment state `escrowed`.
+6. Run inference and show the offchain output plus `output_hash`.
+7. Verify the execution receipt: input hash, output hash, receipt hash, and signature status.
+8. Release payment and finish with payment state `paid`.
 
-Call out that this is the UX Flow bounty angle: complex blockchain concepts are translated into plain states.
+Call out the mode labels. The UI must never silently fake real connectivity:
 
-## 2:20-3:20 API Flow
+- `Backend connected` or `Fixture mode: backend unavailable`.
+- `Local Anvil connected` or `Mock settlement: chain unavailable`.
+- `Local worker connected` or `Mock inference: provider-node unavailable`.
+
+Call out that this is the UX Flow bounty angle: complex blockchain concepts are translated into plain buyer actions.
+
+## 2:50-3:30 API Flow
 
 Run:
 
@@ -47,13 +53,13 @@ Narrate the API steps:
 - mark payment paid;
 - fetch receipt.
 
-## 3:20-4:20 Architecture and Trust
+## 3:30-4:25 Architecture and Trust
 
 Explain the architecture:
 
 - Backend coordinator stores offchain state in memory.
-- Worker node simulates a local compute worker.
-- Contract stores hashes and payment settlement metadata for the local escrow narrative.
+- Worker node runs deterministic mock inference by default or local vLLM/Hugging Face inference when enabled.
+- Local Anvil contract stores hashes and payment settlement metadata for the escrow narrative.
 - Identity resolver is mocked but isolated behind ENS-style endpoints.
 
 Trust model:
@@ -61,8 +67,9 @@ Trust model:
 - Hashes prove integrity of stored values, not semantic correctness.
 - Demo signatures prove the worker signed the receipt, not that the model output is correct.
 - Backend is trusted in this MVP.
+- Local GPU/model usage is a worker claim unless future TEE, ZK, or multi-worker verification is added.
 
-## 4:20-5:00 ETHPrague Fit
+## 4:25-5:00 ETHPrague Fit
 
 Close with:
 
@@ -72,4 +79,3 @@ Close with:
 - ENS: agent and worker identities.
 - Privacy by Design: prompts and outputs stay offchain.
 - UX Flow: readable payment and verification states.
-

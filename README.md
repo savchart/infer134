@@ -86,11 +86,11 @@ Worker Catalog Mode is the default MVP path. Workers advertise models they alrea
 Demo example:
 
 - worker: `gpu-prague.eth`;
-- model: `mock-llama`;
-- source: `worker_catalog`;
+- model: `Qwen/Qwen2.5-0.5B-Instruct` or `mock-llama`;
+- source: `public_registry` for Hugging Face allowlisted models, `worker_catalog` for local mock fallback;
 - readiness: `ready`;
-- runtime: `mock-runtime`;
-- inference fee: `0.01 USDC`.
+- runtime: `vllm` or `mock`;
+- inference fee: `0.001 local ETH`.
 
 ### Custom Model Preparation Mode
 
@@ -117,22 +117,70 @@ No model upload, private model download, Hugging Face auth, or model-weight stor
 - `model_hash` is a signed worker claim in this MVP. It does not prove semantic correctness or real execution.
 - Real private models would need temporary tokens, pre-signed URLs, encryption, trusted workers, or future TEE support.
 
+## Provider Offer Catalog
+
+Workers publish buyer-selectable offers made from explicit capability bundles:
+
+- worker identity, such as `gpu-prague.eth`;
+- GPU capability, such as `NVIDIA RTX 2070`;
+- model capability, such as `Qwen/Qwen2.5-0.5B-Instruct`;
+- runtime, such as `vllm` or `mock`;
+- readiness state;
+- cold-start fee;
+- input and output price per 1M tokens.
+
+The provider page at `/provider` lets a demo worker choose available GPUs, choose allowlisted models, and set per-1M-token pricing. The backend keeps this in memory and exposes:
+
+```text
+GET /offers
+GET /workers/{worker_id}/offers
+```
+
+This is not production billing. It is the catalog layer the buyer flow can use before creating an escrowed inference job.
+
+## Wallet Authentication
+
+Infer134 includes a minimal local wallet-auth flow for the MVP:
+
+- clients connect a browser wallet and sign a challenge before creating buyer jobs;
+- providers connect a browser wallet and sign a challenge before publishing worker offers;
+- backend stores an in-memory session token tied to `client` or `provider` role;
+- the UI falls back to fixture mode when no browser wallet is available.
+
+Endpoints:
+
+```text
+POST /auth/challenge
+POST /auth/verify
+GET /auth/session/{session_token}
+POST /auth/logout
+```
+
+This is not production SIWE. The MVP records the wallet signature and session, but does not recover the signer address server-side. Production work should add signer recovery, SIWE domain binding, expiry enforcement, replay protection, and wallet-scoped authorization checks.
+
 ## Demo Flow
 
-1. Buyer creates an inference job.
-2. Worker sees the open job.
-3. Worker claims the job.
-4. Worker runs mocked inference.
-5. Worker submits the output.
-6. Backend creates a signed execution receipt.
-7. Buyer sees the result and receipt.
-8. Payment state changes visibly.
-9. UI/API explains what is offchain, hashable, verified, and trusted.
+The primary MVP route is `/demo`. It is not a marketing page first; it is the buyer journey itself.
+
+1. Buyer starts as `research-agent.eth`.
+2. Buyer chooses an allowlisted model or mock fallback.
+3. Buyer enters a prompt and sees `input_hash`.
+4. Buyer selects `gpu-prague.eth`.
+5. Buyer creates escrow/payment state.
+6. Worker runs inference offchain.
+7. Buyer verifies the execution receipt.
+8. Buyer releases payment and sees the final result.
+
+The wizard labels connected and degraded modes explicitly:
+
+- `Backend connected` or `Fixture mode: backend unavailable`.
+- `Local Anvil connected` or `Mock settlement: chain unavailable`.
+- `Local worker connected` or `Mock inference: provider-node unavailable`.
 
 ## MVP Architecture
 
 - `backend/`: FastAPI coordinator with in-memory storage, worker registry, job lifecycle, agent route, and execution receipt verification.
-- `provider-node/`: FastAPI worker node with deterministic mocked inference.
+- `provider-node/`: FastAPI worker node with deterministic mock inference by default and optional local vLLM/Hugging Face inference.
 - `contracts/`: Foundry contract for local Anvil escrow and hash-based settlement metadata.
 - `frontend/`: minimal Next.js TypeScript placeholders for buyer, worker, agent, and job-status views.
 - `scripts/demo_flow.sh`: curl-based local API demo.
@@ -213,6 +261,16 @@ cd infer134/backend
 RPC_URL=http://127.0.0.1:8545 CHAIN_ID=31337 INFERENCE_ESCROW_ADDRESS=<address> python -m uvicorn app.main:app --reload
 ```
 
+To let the backend create, submit, and release real local Anvil escrow transactions, also provide local-only Anvil dev keys in your shell:
+
+```bash
+export BUYER_PRIVATE_KEY=<anvil-dev-buyer-private-key>
+export WORKER_PRIVATE_KEY=<anvil-dev-worker-private-key>
+export WORKER_ADDRESS=0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+```
+
+Do not use real private keys. The `WORKER_ADDRESS` must match `WORKER_PRIVATE_KEY` so the contract accepts worker result submission.
+
 Check chain status:
 
 ```bash
@@ -237,6 +295,45 @@ What stays offchain:
 - model weights.
 
 Anvil dev private keys are local-only test keys. Never use them with real funds.
+
+## Real Local Worker Inference with HF Models
+
+Provider-node supports two runtime modes:
+
+- `INFER134_RUNTIME=mock`: deterministic local output for tests and fixture demos.
+- `INFER134_RUNTIME=vllm`: calls a local vLLM OpenAI-compatible server on `127.0.0.1`.
+
+Allowed public Hugging Face demo models:
+
+- `Qwen/Qwen2.5-0.5B-Instruct`
+- `Qwen/Qwen3-0.6B`
+- `HuggingFaceTB/SmolLM2-360M-Instruct`
+
+The buyer chooses from worker-advertised models. Workers own the runtime and may pull allowlisted public models into a local Hugging Face cache. Buyers do not upload model weights, and model weights are never stored onchain.
+
+Start the local vLLM model server:
+
+```bash
+cd infer134
+bash scripts/start_vllm_worker.sh
+```
+
+Start provider-node in vLLM mode:
+
+```bash
+cd infer134/provider-node
+INFER134_RUNTIME=vllm \
+INFER134_MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct \
+INFER134_MODEL_REVISION=main \
+INFER134_VLLM_BASE_URL=http://127.0.0.1:8001/v1 \
+INFER134_VLLM_API_KEY=infer134-local \
+HF_HOME=.hf-cache \
+python -m uvicorn app.main:app --reload --port 8010
+```
+
+If vLLM is not running, provider-node only fails when `INFER134_RUNTIME=vllm` is selected. Normal tests use mock mode and do not download models.
+
+Real local inference improves the hardware demo, but it does not cryptographically prove the claimed GPU or model was used. That remains trusted unless future TEE, ZK, optimistic dispute, or multi-worker verification is added.
 
 ## What Is Verified
 
@@ -323,6 +420,25 @@ Terminal 3, frontend:
 ```bash
 cd infer134/frontend
 npm run dev
+```
+
+## Frontend Demo
+
+Routes:
+
+- `/`: wallet entrypoint. Users connect a wallet, then see available GPU + model offers with actions to add GPU capacity or run inference.
+- `/demo`: primary buyer-centric MVP wizard.
+- `/provider`: provider setup flow for publishing GPU + model offers.
+
+The wizard works in two modes:
+
+- **Backend-connected mode:** the frontend calls the backend through a same-origin Next.js proxy using `NEXT_PUBLIC_API_BASE_URL`. It creates a local job, claims it with a worker, runs inference, submits a receipt, and marks payment paid.
+- **Fixture mode:** if the backend is unavailable, the full 8-step flow still runs with deterministic fixture hashes, fixture transaction hash, mock inference output, and clear degraded-mode labels.
+
+Optional provider status uses `NEXT_PUBLIC_PROVIDER_NODE_URL` and falls back to:
+
+```text
+Mock inference: provider-node unavailable
 ```
 
 Contracts with local Anvil:

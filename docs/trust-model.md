@@ -37,14 +37,18 @@ Infer134 is privacy-first but not trustless in this MVP. It demonstrates the bou
 - Payment state can be verified against the local Anvil escrow contract when deployed.
 - The backend checks that the claiming worker advertises the requested model as ready.
 - The custom model preparation flow reaches explicit `ready` state.
+- In `vllm` mode, provider-node returns output from a local OpenAI-compatible vLLM server instead of the deterministic mock fallback.
+- Wallet auth records that a browser wallet produced a signature over an Infer134 challenge.
 
 ## Trusted in the MVP
 
 - The backend coordinator.
 - The worker claim that it executed the job.
 - The worker claim that `model_hash` represents the actual prepared model.
+- The worker claim that it used the advertised GPU and model runtime.
 - Any backend-only payment-state transition when the local chain is not configured.
 - The semantic correctness and usefulness of the model output.
+- Wallet signer recovery is not production-verified in this MVP; real SIWE or Ethereum signature recovery is future work.
 
 ## Threats
 
@@ -70,6 +74,18 @@ When Anvil is running and `InferenceEscrow` is deployed, native ETH escrow and p
 The contract does not store prompts, outputs, full receipts, model weights, or private model credentials.
 
 Receipt integrity is still verified locally by the backend. Semantic correctness of inference remains trusted/mocked, and `model_hash` remains a signed worker claim rather than cryptographic proof-of-compute.
+
+## Local vLLM / Hugging Face Runtime Boundary
+
+Provider-node can run in `INFER134_RUNTIME=vllm` mode and call a local vLLM OpenAI-compatible server. Workers may pull only allowlisted public Hugging Face models for the demo:
+
+- `Qwen/Qwen2.5-0.5B-Instruct`
+- `Qwen/Qwen3-0.6B`
+- `HuggingFaceTB/SmolLM2-360M-Instruct`
+
+The Hugging Face cache is local worker infrastructure. The buyer does not upload weights, the backend does not store weights, and no weights are put onchain.
+
+Real local inference replaces mock output only when vLLM mode is enabled and reachable. Local GPU usage is not cryptographically proven. The worker's runtime, model ID, revision, and `model_hash` remain signed claims unless future TEE, ZK, optimistic disputes, or multi-worker verification is added.
 
 ## Model Ownership and Preparation
 
@@ -101,6 +117,17 @@ Production replacement:
 - Offchain or encrypted metadata for sensitive details.
 
 Public ENS records must not contain secrets such as API keys, prompts, private endpoints, or personal data.
+
+## Wallet Auth Boundary
+
+The local MVP supports `client` and `provider` wallet sessions:
+
+- the frontend requests a browser wallet account with `eth_requestAccounts`;
+- the backend issues an Infer134 challenge message;
+- the wallet signs the challenge with `personal_sign`;
+- the backend stores the signature and creates an in-memory session token.
+
+This proves a wallet interaction happened in the local demo UI, but the backend does not yet recover the signer address from the signature. Production auth should use SIWE or equivalent Ethereum signature recovery, domain binding, nonce expiry enforcement, replay protection, and role-scoped authorization.
 
 ## Future Hardening
 
